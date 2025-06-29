@@ -1,326 +1,263 @@
 # 🚀 Syft Code Queue
 
-Simple code execution queue for SyftBox datasites.
+A simple, lightweight system for executing code on remote SyftBox datasites with **manual approval workflows**.
 
-## 📋 Overview
+## Overview
 
-`syft-code-queue` provides a lightweight way to submit code for execution on remote SyftBox datasites. It's designed to be much simpler than RDS while still providing essential functionality for secure code execution.
+Syft Code Queue provides a clean separation between **data scientists** who submit code for execution and **data owners** who review and approve that code. All code execution requires explicit manual approval - there is no automatic approval built into the core system.
 
-### Key Features
-
-- **Simple API**: Submit code folders with `run.sh` scripts
-- **Queue Management**: Automatic job queuing and processing
-- **Security**: Safe code execution with configurable approval rules
-- **Auto-approval**: Configurable rules for automatic job approval
-- **Result Retrieval**: Easy access to job outputs and logs
-- **Status Tracking**: Real-time job status monitoring
-
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────┐    submit_code    ┌─────────────────┐
-│   Client App    │ ──────────────────► │  Remote Queue   │
-│   (Requester)   │                   │  (Data Owner)   │
-└─────────────────┘                   └─────────────────┘
-                                               │
-                                               ▼
-                                      ┌─────────────────┐
-                                      │  Queue Server   │
-                                      │  - Auto-approve │
-                                      │  - Execute code │
-                                      │  - Store results│
-                                      └─────────────────┘
+Data Scientist → Submit Code → Data Owner Reviews → Manual Approve → Execute → Results
 ```
 
-## 🚀 Quick Start
+## Key Features
 
-### Installation
+- **📦 Simple Code Submission**: Package code as folders with `run.sh` scripts
+- **🔒 Manual Approval Only**: Data owners must explicitly approve every job
+- **🛡️ Security**: Safe execution with sandboxing and resource limits  
+- **🤖 External Automation**: Automation systems call the manual approval API
+- **📊 Job Management**: Track job status and retrieve results
+- **⚡ Lightweight**: Much simpler than RDS while being fully functional
+
+## Quick Start
+
+### For Data Scientists
+
+```python
+import syft_code_queue as scq
+
+# Submit code for execution
+job = scq.submit_code(
+    target_email="data-owner@university.edu",
+    code_folder=my_analysis_package,
+    name="Statistical Analysis",
+    description="Aggregate statistics computation",
+    tags=["statistics", "privacy-safe"]
+)
+
+print(f"Job submitted: {job.uid}")
+print(f"Status: {job.status}")  # Will be 'pending'
+```
+
+### For Data Owners
+
+```python
+import syft_code_queue as scq
+
+# Create server and review pending jobs
+server = scq.create_server()
+pending_jobs = server.list_pending_jobs()
+
+# Review and approve/reject manually
+for job in pending_jobs:
+    print(f"Job: {job.name} from {job.requester_email}")
+    # ... inspect job.code_folder ...
+    
+    # Manual approval decision
+    server.approve_job(job.uid)  # or
+    server.reject_job(job.uid, "Reason for rejection")
+
+# Start server to execute approved jobs
+server.start()
+```
+
+## Installation
 
 ```bash
 pip install syft-code-queue
 ```
 
-### Basic Usage
+## Tutorials
 
-#### 1. Submit Code for Execution
+We provide role-specific tutorials for different users:
 
-```python
-import syft_code_queue as scq
-from pathlib import Path
+- **🔬 Data Scientists**: `examples/DataScientist_Tutorial.ipynb` - Learn to submit and monitor jobs
+- **🏛️ Data Owners**: `examples/DataOwner_Tutorial.ipynb` - Learn to review and approve jobs  
+- **📋 Overview**: `examples/SyftCodeQueue_Tutorial.ipynb` - System overview and concepts
 
-# Create your code folder with run.sh
-code_folder = Path("my_analysis")
-code_folder.mkdir(exist_ok=True)
+## Manual Approval Architecture
 
-# Create run.sh script
-(code_folder / "run.sh").write_text("""#!/bin/bash
-echo "Analyzing data..."
-python analysis.py > "$SYFT_OUTPUT_DIR/results.txt"
-echo "Analysis complete!"
-""")
+The core design principle is **manual approval only**:
 
-# Submit to remote datasite
-job = scq.submit_code(
-    target_email="data-owner@example.com",
-    code_folder=code_folder,
-    name="Data Analysis Job",
-    description="Statistical analysis of dataset",
-    tags=["analysis", "statistics"],
-    auto_approval=True
-)
+### ✅ What's Included
+- Job submission and queuing
+- Manual approval/rejection API
+- Safe code execution engine
+- Job status tracking and results retrieval
 
-print(f"Job submitted: {job.uid}")
-```
+### ❌ What's NOT Included  
+- Built-in auto-approval rules
+- Automatic approval logic
+- Built-in trust systems
 
-#### 2. Monitor Job Status
+### 🤖 External Automation
+
+Any automation must be **external** and call the manual approval API:
 
 ```python
-client = scq.create_client()
-
-# Check specific job
-job = client.get_job(job_uid)
-print(f"Status: {job.status}")
-
-# List all jobs
-jobs = client.list_jobs(limit=10)
-for job in jobs:
-    print(f"{job.name}: {job.status}")
+# External automation example
+def smart_approval_bot(server):
+    pending = server.list_pending_jobs()
+    for job in pending:
+        if meets_my_criteria(job):
+            server.approve_job(job.uid)
+        else:
+            server.reject_job(job.uid, "Does not meet criteria")
 ```
 
-#### 3. Retrieve Results
+See `examples/external_automation_example.py` for a complete example.
 
-```python
-# Get job output
-output_path = client.get_job_output(job_uid)
-if output_path:
-    results = (output_path / "results.txt").read_text()
-    print(results)
+## Code Package Structure
 
-# Get execution logs
-logs = client.get_job_logs(job_uid)
-print(logs)
-```
-
-### Running a Queue Server
-
-```python
-import syft_code_queue as scq
-
-def custom_approval_rules(job):
-    """Define custom auto-approval logic."""
-    # Auto-approve analysis jobs
-    if "analysis" in job.tags:
-        return True
-    
-    # Auto-approve from trusted domains
-    if "@company.com" in job.requester_email:
-        return True
-    
-    return False
-
-# Start server
-server = scq.create_server(
-    auto_approval_callback=custom_approval_rules,
-    max_concurrent_jobs=3,
-    job_timeout=600  # 10 minutes
-)
-
-server.start()
-```
-
-## 📁 Code Folder Structure
-
-Your code folder must contain a `run.sh` script:
+Every job submission must be a folder containing:
 
 ```
 my_analysis/
-├── run.sh              # Required: Main execution script
-├── analysis.py         # Your code files
-├── requirements.txt    # Dependencies
-└── data/              # Any data files
+├── run.sh              # Main execution script (required)
+├── analyze.py          # Your analysis code
+├── requirements.txt    # Python dependencies (optional)
+└── README.md          # Documentation (optional)
 ```
 
-### Environment Variables
-
-Your `run.sh` script has access to these variables:
-
-- `SYFT_JOB_ID`: Unique job identifier
-- `SYFT_JOB_NAME`: Human-readable job name
-- `SYFT_OUTPUT_DIR`: Directory to write results
-- `SYFT_REQUESTER`: Email of the requester
-
-### Example run.sh
+### Example `run.sh`:
 
 ```bash
 #!/bin/bash
-set -e  # Exit on error
+set -e
 
-echo "Starting job: $SYFT_JOB_NAME"
-echo "Requester: $SYFT_REQUESTER"
+echo "Starting analysis..."
 
-# Install dependencies if needed
+# Install dependencies
 if [ -f requirements.txt ]; then
     pip install -r requirements.txt
 fi
 
-# Run your analysis
-python analysis.py
+# Run analysis
+python analyze.py
 
-# Save results
-echo "Job completed successfully" > "$SYFT_OUTPUT_DIR/status.txt"
-cp results.csv "$SYFT_OUTPUT_DIR/"
-
-echo "Output saved to: $SYFT_OUTPUT_DIR"
+echo "Analysis complete!"
 ```
 
-## 🔧 Configuration
+## Security Features
 
-### Client Configuration
+- **Safe Execution**: `SafeCodeRunner` with timeouts and resource limits
+- **Command Filtering**: Block dangerous operations
+- **Sandboxing**: Isolated execution environment
+- **Manual Review**: Human oversight of all code execution
+- **Audit Trail**: All approvals/rejections are logged
+
+## Job Lifecycle
+
+```
+📤 submit → ⏳ pending → ✅ approved → 🏃 running → 🎉 completed
+                     ↘ 🚫 rejected            ↘ ❌ failed
+```
+
+### Status Reference
+- **pending**: Waiting for data owner approval
+- **approved**: Approved by data owner, waiting to execute
+- **running**: Currently executing on datasite
+- **completed**: Finished successfully, results available
+- **failed**: Execution failed (see error logs)
+- **rejected**: Rejected by data owner
+
+## Best Practices
+
+### For Data Scientists
+- Use clear, descriptive job names and descriptions
+- Include privacy-safe tags like `aggregate-analysis`, `statistics`
+- Only request aggregate computations, never individual records
+- Test code locally before submission
+- Be responsive to data owner questions
+
+### For Data Owners
+- Review all submitted code thoroughly
+- Check for privacy compliance and data safety
+- Provide clear feedback when rejecting requests
+- Set up automated monitoring for your approval workflows
+- Maintain clear approval criteria for your organization
+
+## API Reference
+
+### Client API
+
+```python
+# Submit code
+job = scq.submit_code(target_email, code_folder, name, description, tags)
+
+# Monitor jobs
+client = scq.create_client()
+jobs = client.list_jobs(status=scq.JobStatus.pending)
+job = client.get_job(job_uid)
+results = client.get_job_output(job_uid)
+logs = client.get_job_logs(job_uid)
+```
+
+### Server API
+
+```python
+# Create and manage server
+server = scq.create_server(max_concurrent_jobs=3, job_timeout=600)
+
+# Review jobs
+pending = server.list_pending_jobs()
+
+# Manual approval
+server.approve_job(job_uid)
+server.reject_job(job_uid, reason)
+
+# Execute approved jobs
+server.start()  # Runs continuously
+server.stop()
+```
+
+## Configuration
 
 ```python
 from syft_code_queue import QueueConfig
 
 config = QueueConfig(
-    queue_name="my-custom-queue",
-    max_concurrent_jobs=5,
-    job_timeout=1800,  # 30 minutes
-    cleanup_completed_after=86400,  # 24 hours
-    auto_approval_enabled=True
+    queue_name="my-datasite-queue",
+    max_concurrent_jobs=3,
+    job_timeout=600,  # 10 minutes
+    cleanup_completed_after=86400  # 24 hours
 )
 
-client = scq.CodeQueueClient(config=config)
+server = scq.CodeQueueServer(config=config)
 ```
 
-### Server Configuration
+## Integration with Other Tools
 
-```python
-server = scq.create_server(
-    queue_name="analysis-queue",
-    max_concurrent_jobs=2,
-    job_timeout=600,
-    auto_approval_enabled=True
-)
+- **syft-nsai**: Generate analysis code with AI, execute with queue
+- **SyftBox**: Leverages existing datasite infrastructure
+- **Custom Apps**: Easy integration with any Python application
+
+## Development
+
+```bash
+git clone <repository>
+cd syft-code-queue
+
+# Install in development mode
+pip install -e .
+
+# Run tests
+pytest
+
+# Run examples
+python examples/external_automation_example.py
 ```
 
-## 🛡️ Security Features
+## Contributing
 
-### Safe Code Runner
+See `CONTRIBUTING.md` for development guidelines.
 
-The default `SafeCodeRunner` includes security measures:
+## License
 
-```python
-from syft_code_queue import SafeCodeRunner
-
-runner = SafeCodeRunner(
-    timeout=300,
-    max_output_size=10*1024*1024,  # 10MB
-    blocked_commands=["rm", "sudo", "passwd"],  # Blacklist
-    allowed_commands=["python", "pip", "echo"]  # Whitelist (optional)
-)
-```
-
-### Auto-Approval Rules
-
-Configure safe auto-approval:
-
-```python
-def safe_approval_rules(job):
-    # Only auto-approve certain types
-    safe_tags = {"visualization", "statistics", "report"}
-    if not any(tag in safe_tags for tag in job.tags):
-        return False
-    
-    # Check requester domain
-    trusted_domains = ["@university.edu", "@research.org"]
-    if not any(domain in job.requester_email for domain in trusted_domains):
-        return False
-    
-    return True
-```
-
-## 📊 Job Lifecycle
-
-```
-Submit → Pending → Approved → Running → Completed
-           ↓         ↓          ↓         ↓
-        Rejected   Failed    Failed   (Results Available)
-```
-
-### Job Status
-
-- `pending`: Waiting for approval
-- `approved`: Approved, waiting to run  
-- `running`: Currently executing
-- `completed`: Finished successfully
-- `failed`: Execution failed
-- `rejected`: Rejected by data owner
-
-## 🔍 Advanced Usage
-
-### Custom Runners
-
-```python
-from syft_code_queue import CodeRunner
-
-class CustomRunner(CodeRunner):
-    def run_job(self, job):
-        # Custom execution logic
-        print(f"Running {job.name} with custom logic")
-        return super().run_job(job)
-
-server = scq.CodeQueueServer(runner=CustomRunner())
-```
-
-### Job Filtering
-
-```python
-# Filter jobs by status
-pending_jobs = client.list_jobs(status=scq.JobStatus.pending)
-
-# Filter by target
-my_jobs = client.list_jobs(target_email="my-datasite@example.com")
-```
-
-### Manual Job Management
-
-```python
-# Approve/reject jobs manually
-server.approve_job(job_uid)
-server.reject_job(job_uid, reason="Security concerns")
-
-# Cancel submitted jobs
-client.cancel_job(job_uid)
-```
-
-## 🆚 Comparison with RDS
-
-| Feature | syft-code-queue | RDS |
-|---------|----------------|-----|
-| **Complexity** | Simple | Full-featured |
-| **Setup** | Minimal | Complex |
-| **Code Format** | `run.sh` folders | Structured datasets |
-| **Approval** | Built-in | Manual |
-| **Performance** | Lightweight | Heavy |
-| **Use Case** | Simple execution | Data science workflows |
-
-## 📝 Examples
-
-See the `examples/` directory for:
-- `basic_usage.py`: Complete workflow example
-- `server_setup.py`: Queue server configuration
-- `custom_approval.py`: Advanced approval rules
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Submit a pull request
-
-## 📄 License
-
-Apache 2.0 License - see LICENSE file for details.
+Licensed under the Apache License 2.0. See `LICENSE` file for details.
 
 ---
 
-**Made with ❤️ by the OpenMined community** 
+**Simple. Secure. Manual. 🚀** 

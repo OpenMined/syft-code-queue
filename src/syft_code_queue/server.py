@@ -36,19 +36,16 @@ class CodeQueueServer:
     
     def __init__(self, 
                  config: Optional[QueueConfig] = None,
-                 runner: Optional[CodeRunner] = None,
-                 approval_callback: Optional[Callable[[CodeJob], bool]] = None):
+                 runner: Optional[CodeRunner] = None):
         """
         Initialize the queue server.
         
         Args:
             config: Queue configuration
             runner: Code runner instance (defaults to SafeCodeRunner)
-            approval_callback: Optional callback for auto-approval logic
         """
         self.config = config or QueueConfig()
         self.runner = runner or SafeCodeRunner()  # Use safe runner by default
-        self.approval_callback = approval_callback
         
         self.syftbox_client = SyftBoxClient.load()
         self.executor = ThreadPoolExecutor(max_workers=self.config.max_concurrent_jobs)
@@ -114,7 +111,7 @@ class CodeQueueServer:
         logger.info("Queue processing loop stopped")
     
     def _process_pending_jobs(self):
-        """Process jobs waiting for approval."""
+        """Process jobs waiting for approval - just log for now."""
         pending_jobs = self._get_jobs_by_status(JobStatus.pending)
         
         for job in pending_jobs:
@@ -122,16 +119,8 @@ class CodeQueueServer:
             if job.target_email != self.email:
                 continue
             
-            logger.info(f"Processing pending job: {job.name} from {job.requester_email}")
-            
-            # Check for auto-approval
-            if self._should_auto_approve(job):
-                logger.info(f"Auto-approving job {job.uid}")
-                job.update_status(JobStatus.approved)
-                self._save_job(job)
-            else:
-                logger.info(f"Job {job.uid} requires manual approval")
-                # In a real implementation, you might send notifications here
+            logger.info(f"Pending job awaiting approval: {job.name} from {job.requester_email}")
+            # All jobs require manual approval - no auto-approval logic here
     
     def _execute_approved_jobs(self):
         """Execute jobs that have been approved."""
@@ -179,40 +168,7 @@ class CodeQueueServer:
             # Always save the final job state
             self._save_job(job)
     
-    def _should_auto_approve(self, job: CodeJob) -> bool:
-        """Determine if a job should be auto-approved."""
-        # Check if auto-approval is enabled
-        if not self.config.auto_approval_enabled:
-            return False
-        
-        # Check if job is marked for auto-approval
-        if not job.auto_approval:
-            return False
-        
-        # Use custom approval callback if provided
-        if self.approval_callback:
-            try:
-                return self.approval_callback(job)
-            except Exception as e:
-                logger.error(f"Approval callback failed for job {job.uid}: {e}")
-                return False
-        
-        # Default auto-approval rules
-        return self._default_auto_approval_rules(job)
-    
-    def _default_auto_approval_rules(self, job: CodeJob) -> bool:
-        """Default auto-approval rules."""
-        # Auto-approve jobs with certain tags
-        safe_tags = {"data-analysis", "visualization", "statistics", "report"}
-        if any(tag in safe_tags for tag in job.tags):
-            return True
-        
-        # Auto-approve from trusted requesters (you'd customize this)
-        trusted_domains = {"@openmined.org", "@company.com"}
-        if any(domain in job.requester_email for domain in trusted_domains):
-            return True
-        
-        return False
+
     
     def _cleanup_old_jobs(self):
         """Clean up old completed jobs."""
@@ -344,17 +300,15 @@ class CodeQueueServer:
         return self._get_queue_dir() / str(job.uid)
 
 
-def create_server(auto_approval_callback: Optional[Callable[[CodeJob], bool]] = None,
-                  **config_kwargs) -> CodeQueueServer:
+def create_server(**config_kwargs) -> CodeQueueServer:
     """
     Create a code queue server.
     
     Args:
-        auto_approval_callback: Optional callback for custom auto-approval logic
-        **config_kwargs: Additional configuration options
+        **config_kwargs: Configuration options for QueueConfig
         
     Returns:
         CodeQueueServer instance
     """
     config = QueueConfig(**config_kwargs)
-    return CodeQueueServer(config=config, approval_callback=auto_approval_callback) 
+    return CodeQueueServer(config=config) 

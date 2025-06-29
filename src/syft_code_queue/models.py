@@ -48,7 +48,6 @@ class CodeJob(BaseModel):
     
     # Metadata
     tags: list[str] = Field(default_factory=list)
-    auto_approval: bool = False  # If true, can be auto-approved by rules
     
     def update_status(self, new_status: JobStatus, error_message: Optional[str] = None):
         """Update job status with timestamp."""
@@ -83,7 +82,6 @@ class JobCreate(BaseModel):
     code_folder: Path
     description: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
-    auto_approval: bool = False
 
 
 class JobUpdate(BaseModel):
@@ -99,5 +97,4 @@ class QueueConfig(BaseModel):
     queue_name: str = "code-queue"
     max_concurrent_jobs: int = 3
     job_timeout: int = 300  # 5 minutes default
-    cleanup_completed_after: int = 86400  # 24 hours
-    auto_approval_enabled: bool = True 
+    cleanup_completed_after: int = 86400  # 24 hours 

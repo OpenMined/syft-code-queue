@@ -47,8 +47,7 @@ class CodeQueueClient:
                     code_folder: Path,
                     name: str,
                     description: Optional[str] = None,
-                    tags: Optional[List[str]] = None,
-                    auto_approval: bool = False) -> CodeJob:
+                    tags: Optional[List[str]] = None) -> CodeJob:
         """
         Submit code for execution on a remote datasite.
         
@@ -58,7 +57,6 @@ class CodeQueueClient:
             name: Human-readable name for the job
             description: Optional description
             tags: Optional tags for categorization
-            auto_approval: Whether this job can be auto-approved
             
         Returns:
             CodeJob: The created job
@@ -77,8 +75,7 @@ class CodeQueueClient:
             target_email=target_email,
             code_folder=code_folder,
             description=description,
-            tags=tags or [],
-            auto_approval=auto_approval
+            tags=tags or []
         )
         
         job = CodeJob(

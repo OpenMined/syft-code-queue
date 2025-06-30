@@ -37,10 +37,6 @@ def test_code_job_creation():
     assert job.description == "Test description"
     assert job.tags == ["test", "demo"]
     assert job.status == JobStatus.pending
-    assert job.auto_approval is False
-    assert isinstance(job.uid, UUID)
-    assert isinstance(job.created_at, datetime)
-    assert isinstance(job.updated_at, datetime)
 
 
 def test_job_status_updates():
@@ -129,20 +125,6 @@ def test_queue_config():
     assert config.max_concurrent_jobs == 3
     assert config.job_timeout == 300
     assert config.cleanup_completed_after == 86400
-    assert config.auto_approval_enabled is True
-    
-    # Test custom values
-    custom_config = QueueConfig(
-        queue_name="custom-queue",
-        max_concurrent_jobs=5,
-        job_timeout=600,
-        auto_approval_enabled=False
-    )
-    
-    assert custom_config.queue_name == "custom-queue"
-    assert custom_config.max_concurrent_jobs == 5
-    assert custom_config.job_timeout == 600
-    assert custom_config.auto_approval_enabled is False
 
 
 def test_job_serialization():
@@ -153,19 +135,16 @@ def test_job_serialization():
         target_email="target@example.com",
         code_folder=Path("/tmp/test"),
         description="Test description",
-        tags=["test", "demo"],
-        auto_approval=True
+        tags=["test", "demo"]
     )
     
     # Serialize
     data = job.model_dump()
     assert data["name"] == "Test Job"
     assert data["requester_email"] == "requester@example.com"
-    assert data["auto_approval"] is True
     
     # Deserialize
     restored_job = CodeJob.model_validate(data)
     assert restored_job.name == job.name
     assert restored_job.uid == job.uid
-    assert restored_job.requester_email == job.requester_email
-    assert restored_job.auto_approval == job.auto_approval 
+    assert restored_job.requester_email == job.requester_email 

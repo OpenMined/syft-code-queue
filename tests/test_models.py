@@ -61,7 +61,7 @@ def test_job_status_updates():
     # Update with error
     job.update_status(JobStatus.failed, "Test error")
     assert job.status == JobStatus.failed
-    assert job.error == "Test error"
+    assert job.error_message == "Test error"
 
 
 def test_job_terminal_status():

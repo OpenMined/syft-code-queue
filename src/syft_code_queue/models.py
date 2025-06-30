@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING, List, Union
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, PrivateAttr
@@ -24,124 +24,124 @@ class JobStatus(str, enum.Enum):
 
 class CodeJob(BaseModel):
     """Represents a code execution job in the queue."""
-    
+
     # Core identifiers
     uid: UUID = Field(default_factory=uuid4)
     name: str
-    
+
     # Requester info
     requester_email: str
     target_email: str  # Data owner who needs to approve
-    
+
     # Code details
     code_folder: Path  # Local path to code folder
     description: Optional[str] = None
-    
+
     # Status and timing
     status: JobStatus = JobStatus.pending
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    
+
     # Results
     output_folder: Optional[Path] = None
     error_message: Optional[str] = None
     exit_code: Optional[int] = None
-    
+
     # Metadata
     tags: list[str] = Field(default_factory=list)
-    
+
     # Internal references (private attributes)
     _client: Optional["CodeQueueClient"] = PrivateAttr(default=None)
-    
+
     def update_status(self, new_status: JobStatus, error_message: Optional[str] = None):
         """Update job status with timestamp."""
         self.status = new_status
         self.updated_at = datetime.now()
-        
+
         if new_status == JobStatus.running:
             self.started_at = datetime.now()
         elif new_status in (JobStatus.completed, JobStatus.failed, JobStatus.rejected):
             self.completed_at = datetime.now()
-            
+
         if error_message:
             self.error_message = error_message
-    
+
     @property
     def is_terminal(self) -> bool:
         """Check if job is in a terminal state."""
         return self.status in (JobStatus.completed, JobStatus.failed, JobStatus.rejected)
-    
+
     @property
     def duration(self) -> Optional[float]:
         """Get job duration in seconds if completed."""
         if self.started_at and self.completed_at:
             return (self.completed_at - self.started_at).total_seconds()
         return None
-    
+
     @property
     def short_id(self) -> str:
         """Get short version of UUID for display."""
         return str(self.uid)[:8]
-    
+
     def approve(self, reason: Optional[str] = None) -> bool:
         """
         Approve this job for execution.
-        
+
         Args:
             reason: Optional reason for approval
-            
+
         Returns:
             bool: True if approved successfully
         """
         if self._client is None:
             raise RuntimeError("Job not connected to DataOwner API - cannot approve")
-        
+
         success = self._client.approve_job(str(self.uid), reason)
         if success:
             # Update local status immediately for better UX
             self.status = JobStatus.approved
             self.updated_at = datetime.now()
         return success
-    
+
     def reject(self, reason: Optional[str] = None) -> bool:
         """
         Reject this job.
-        
+
         Args:
             reason: Optional reason for rejection
-            
+
         Returns:
-            bool: True if rejected successfully  
+            bool: True if rejected successfully
         """
         if self._client is None:
             raise RuntimeError("Job not connected to DataOwner API - cannot reject")
-        
+
         success = self._client.reject_job(str(self.uid), reason)
         if success:
             # Update local status immediately for better UX
             self.status = JobStatus.rejected
             self.updated_at = datetime.now()
         return success
-    
+
     def deny(self, reason: Optional[str] = None) -> bool:
         """Alias for reject."""
         return self.reject(reason)
-    
+
     def review(self) -> Optional[dict]:
         """Get detailed review information for this job."""
         if self._client is None:
             raise RuntimeError("Job not connected to DataOwner API - cannot review")
-        
+
         # Get the full job details
         job = self._client.get_job(str(self.uid))
         if job is None:
             return None
-        
+
         # Get code files if available
         code_files = self._client.get_job_code_files(str(self.uid)) or []
-        
+
         return {
             "uid": str(self.uid),
             "name": self.name,
@@ -154,50 +154,48 @@ class CodeJob(BaseModel):
             "code_files": [str(f.name) for f in code_files],
             "code_folder": str(self.code_folder)
         }
-    
+
     def get_output(self) -> Optional[Path]:
         """Get the output directory for this job."""
         if self._client is None:
             raise RuntimeError("Job not connected to DataScientist API - cannot get output")
         return self._client.get_job_output(self.uid)
-    
+
     def get_logs(self) -> Optional[str]:
         """Get the execution logs for this job."""
         if self._client is None:
             raise RuntimeError("Job not connected to DataScientist API - cannot get logs")
         return self._client.get_job_logs(self.uid)
-    
+
     def wait_for_completion(self, timeout: int = 600) -> "CodeJob":
         """Wait for this job to complete."""
         if self._client is None:
             raise RuntimeError("Job not connected to DataScientist API - cannot wait")
         return self._client.wait_for_completion(self.uid, timeout)
-    
+
     def _repr_html_(self):
         """HTML representation for Jupyter notebooks."""
         import html
-        
+
         # Determine status styling
         status_class = f"syft-badge-{self.status.value}"
-        
+
         # Format creation time
-        time_display = "Just now" if self.created_at else "Unknown"
+        time_display = "unknown"
         try:
-            from datetime import datetime
-            if self.created_at:
-                now = datetime.now()
-                diff = now - self.created_at
-                if diff.total_seconds() < 60:
-                    time_display = "Just now"
-                elif diff.total_seconds() < 3600:
-                    time_display = f"{int(diff.total_seconds() / 60)} minutes ago"
-                elif diff.total_seconds() < 86400:
-                    time_display = f"{int(diff.total_seconds() / 3600)} hours ago"
-                else:
-                    time_display = f"{int(diff.total_seconds() / 86400)} days ago"
-        except:
+            diff = datetime.now() - self.created_at
+            if diff.total_seconds() < 60:
+                time_display = "just now"
+            elif diff.total_seconds() < 3600:
+                time_display = f"{int(diff.total_seconds() / 60)}m ago"
+            elif diff.total_seconds() < 86400:
+                time_display = f"{int(diff.total_seconds() / 3600)}h ago"
+            else:
+                time_display = f"{int(diff.total_seconds() / 86400)} days ago"
+        except (TypeError, AttributeError):
+            # Handle cases where created_at is None or invalid
             pass
-        
+
         # Build tags HTML
         tags_html = ""
         if self.tags:
@@ -205,7 +203,7 @@ class CodeJob(BaseModel):
             for tag in self.tags:
                 tags_html += f'            <span class="syft-tag">{html.escape(tag)}</span> '
             tags_html += '\n        </div>\n        '
-        
+
         # Action buttons based on status and available APIs
         actions_html = ""
         if self.status == JobStatus.pending:
@@ -269,10 +267,10 @@ class CodeJob(BaseModel):
             </div>
         </div>
         '''
-        
+
         return f'''
     <div class="syft-job-container">
-        
+
     <style>
     .syft-job-container {{
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -280,7 +278,7 @@ class CodeJob(BaseModel):
         margin: 0;
         padding: 0;
     }}
-    
+
     .syft-card {{
         border: 1px solid #e5e7eb;
         border-radius: 8px;
@@ -290,32 +288,32 @@ class CodeJob(BaseModel):
         box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
         transition: all 0.2s ease;
     }}
-    
+
     .syft-card:hover {{
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     }}
-    
+
     .syft-card-header {{
         padding: 20px 24px 0 24px;
     }}
-    
+
     .syft-card-content {{
         padding: 20px 24px 24px 24px;
     }}
-    
+
     .syft-card-title {{
         font-size: 18px;
         font-weight: 600;
         color: #111827;
         margin: 0 0 4px 0;
     }}
-    
+
     .syft-card-description {{
         color: #6b7280;
         font-size: 14px;
         margin: 0 0 16px 0;
     }}
-    
+
     .syft-badge {{
         display: inline-flex;
         align-items: center;
@@ -325,43 +323,43 @@ class CodeJob(BaseModel):
         font-weight: 500;
         text-transform: capitalize;
     }}
-    
+
     .syft-badge-pending {{
         border: 1px solid #fde047;
         background-color: #fefce8;
         color: #ca8a04;
     }}
-    
+
     .syft-badge-approved {{
         border: 1px solid #6ee7b7;
         background-color: #ecfdf5;
         color: #047857;
     }}
-    
+
     .syft-badge-running {{
         border: 1px solid #93c5fd;
         background-color: #eff6ff;
         color: #1d4ed8;
     }}
-    
+
     .syft-badge-completed {{
         border: 1px solid #6ee7b7;
         background-color: #ecfdf5;
         color: #047857;
     }}
-    
+
     .syft-badge-failed {{
         border: 1px solid #fca5a5;
         background-color: #fef2f2;
         color: #dc2626;
     }}
-    
+
     .syft-badge-rejected {{
         border: 1px solid #fca5a5;
         background-color: #fef2f2;
         color: #dc2626;
     }}
-    
+
     .syft-btn {{
         display: inline-flex;
         align-items: center;
@@ -376,46 +374,46 @@ class CodeJob(BaseModel):
         margin-right: 8px;
         margin-bottom: 4px;
     }}
-    
+
     .syft-btn-approve {{
         border-color: #10b981;
         color: #047857;
         background-color: #ecfdf5;
     }}
-    
+
     .syft-btn-approve:hover {{
         background-color: #d1fae5;
         color: #065f46;
     }}
-    
+
     .syft-btn-reject {{
         border-color: #ef4444;
         color: #dc2626;
         background-color: #fef2f2;
     }}
-    
+
     .syft-btn-reject:hover {{
         background-color: #fee2e2;
         color: #b91c1c;
     }}
-    
+
     .syft-btn-secondary {{
         border-color: #d1d5db;
         color: #374151;
         background-color: #ffffff;
     }}
-    
+
     .syft-btn-secondary:hover {{
         background-color: #f9fafb;
         color: #111827;
     }}
-    
+
     .syft-meta {{
         color: #6b7280;
         font-size: 13px;
         margin: 4px 0;
     }}
-    
+
     .syft-actions {{
         display: flex;
         justify-content: space-between;
@@ -423,14 +421,14 @@ class CodeJob(BaseModel):
         margin-top: 16px;
         flex-wrap: wrap;
     }}
-    
+
     .syft-tags {{
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
         margin: 8px 0;
     }}
-    
+
     .syft-tag {{
         background-color: #f3f4f6;
         color: #374151;
@@ -439,60 +437,60 @@ class CodeJob(BaseModel):
         font-size: 12px;
         font-weight: 500;
     }}
-    
+
     .syft-header-row {{
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
         margin-bottom: 8px;
     }}
-    
+
     @media (prefers-color-scheme: dark) {{
         .syft-job-container {{
             color: #f9fafb;
         }}
-        
+
         .syft-card {{
             background: #1f2937;
             border-color: #374151;
         }}
-        
+
         .syft-card-title {{
             color: #f9fafb;
         }}
-        
+
         .syft-card-description {{
             color: #9ca3af;
         }}
-        
+
         .syft-meta {{
             color: #9ca3af;
         }}
-        
+
         .syft-badge-pending {{
             border-color: #fbbf24;
             background-color: rgba(251, 191, 36, 0.1);
             color: #fbbf24;
         }}
-        
+
         .syft-badge-approved {{
             border-color: #10b981;
             background-color: rgba(16, 185, 129, 0.1);
             color: #10b981;
         }}
-        
+
         .syft-badge-completed {{
             border-color: #10b981;
             background-color: rgba(16, 185, 129, 0.1);
             color: #10b981;
         }}
-        
+
         .syft-badge-failed {{
             border-color: #ef4444;
             background-color: rgba(239, 68, 68, 0.1);
             color: #ef4444;
         }}
-        
+
         .syft-badge-rejected {{
             border-color: #ef4444;
             background-color: rgba(239, 68, 68, 0.1);
@@ -500,7 +498,7 @@ class CodeJob(BaseModel):
         }}
     }}
     </style>
-    
+
         <div class="syft-card">
             <div class="syft-card-header">
                 <div class="syft-header-row">
@@ -514,14 +512,14 @@ class CodeJob(BaseModel):
             </div>
             <div class="syft-card-content">
                 <div class="syft-meta">
-                    <strong>From:</strong> {html.escape(self.requester_email)} • 
-                    <strong>To:</strong> {html.escape(self.target_email)} • 
+                    <strong>From:</strong> {html.escape(self.requester_email)} •
+                    <strong>To:</strong> {html.escape(self.target_email)} •
                     <strong>ID:</strong> {self.short_id}
                 </div>
                 {actions_html}
             </div>
         </div>
-        
+
     <script>
     window.reviewJob = function(jobId) {{
         var code = `# Review job details (use collection[index] for specific job)
@@ -544,11 +542,11 @@ if job:
     print(f"👤 From: {{job.requester_email}}")
     print(f"📝 Description: {{job.description or 'No description'}}")
     print(f"🏷️  Tags: {{', '.join(job.tags) if job.tags else 'None'}}")
-    
+
     details = job.review()
     if details and details.get('code_files'):
         print(f"\\n📁 Code files: {{', '.join(details['code_files'])}}")
-    
+
     # Show code content preview
     from pathlib import Path
     if hasattr(job, 'code_folder') and job.code_folder:
@@ -564,7 +562,7 @@ if job:
             print("-" * 40)
 else:
     print(f"❌ Job ${{jobId}} not found")`;
-        
+
         navigator.clipboard.writeText(code).then(() => {{
             // Update button to show success
             var buttons = document.querySelectorAll(`button[onclick="reviewJob('${{jobId}}')"]`);
@@ -582,7 +580,7 @@ else:
             alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
         }});
     }};
-    
+
     window.approveJob = function(jobId) {{
         var reason = prompt("Approval reason (optional):", "Approved via Jupyter interface");
         if (reason !== null) {{  // User didn't cancel
@@ -603,7 +601,7 @@ if job:
         print(f"❌ Failed to approve job: {{job.name}}")
 else:
     print(f"❌ Job ${{jobId}} not found")`;
-            
+
             navigator.clipboard.writeText(code).then(() => {{
                 // Update button to show success
                 var buttons = document.querySelectorAll(`button[onclick="approveJob('${{jobId}}')"]`);
@@ -622,7 +620,7 @@ else:
             }});
         }}
     }};
-    
+
     window.rejectJob = function(jobId) {{
         var reason = prompt("Rejection reason:", "");
         if (reason !== null && reason.trim() !== "") {{
@@ -643,7 +641,7 @@ if job:
         print(f"❌ Failed to reject job: {{job.name}}")
 else:
     print(f"❌ Job ${{jobId}} not found")`;
-            
+
             navigator.clipboard.writeText(code).then(() => {{
                 // Update button to show success
                 var buttons = document.querySelectorAll(`button[onclick="rejectJob('${{jobId}}')"]`);
@@ -662,7 +660,7 @@ else:
             }});
         }}
     }};
-    
+
     window.viewLogs = function(jobId) {{
         var code = `# View job execution logs
 import syft_code_queue as q
@@ -683,7 +681,7 @@ if job:
         print(f"📜 No logs available for {{job.name}}")
 else:
     print(f"❌ Job ${{jobId}} not found")`;
-        
+
         navigator.clipboard.writeText(code).then(() => {{
             // Update button to show success
             var buttons = document.querySelectorAll(`button[onclick="viewLogs('${{jobId}}')"]`);
@@ -701,7 +699,7 @@ else:
             alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
         }});
     }};
-    
+
     window.viewOutput = function(jobId) {{
         var code = `# View job output files
 import syft_code_queue as q
@@ -715,7 +713,7 @@ if job:
     output_path = job.get_output()
     if output_path:
         print(f"📁 Output location for {{job.name}}: {{output_path}}")
-        
+
         # Try to show output directory contents
         from pathlib import Path
         if Path(output_path).exists():
@@ -731,7 +729,7 @@ if job:
         print(f"📁 No output path available for {{job.name}}")
 else:
     print(f"❌ Job ${{jobId}} not found")`;
-        
+
         navigator.clipboard.writeText(code).then(() => {{
             // Update button to show success
             var buttons = document.querySelectorAll(`button[onclick="viewOutput('${{jobId}}')"]`);
@@ -750,7 +748,7 @@ else:
         }});
     }};
     </script>
-    
+
     </div>
     '''
 
@@ -760,23 +758,23 @@ else:
 
 class JobCollection(list[CodeJob]):
     """A collection of CodeJob objects that behaves like a list but with additional methods."""
-    
-    def __init__(self, jobs: List[CodeJob] = None):
+
+    def __init__(self, jobs: list[CodeJob] = None):
         if jobs is None:
             jobs = []
         super().__init__(jobs)
-    
+
     def by_status(self, status: JobStatus) -> "JobCollection":
         """Filter jobs by status."""
         filtered = [job for job in self if job.status == status]
         return JobCollection(filtered)
-    
+
     def by_name(self, name: str) -> "JobCollection":
         """Filter jobs by name (case insensitive)."""
         name_lower = name.lower()
         filtered = [job for job in self if name_lower in job.name.lower()]
         return JobCollection(filtered)
-    
+
     def by_tags(self, *tags: str) -> "JobCollection":
         """Filter jobs that have any of the specified tags."""
         filtered = []
@@ -784,19 +782,19 @@ class JobCollection(list[CodeJob]):
             if any(tag in job.tags for tag in tags):
                 filtered.append(job)
         return JobCollection(filtered)
-    
+
     def pending(self) -> "JobCollection":
         """Get only pending jobs."""
         return self.by_status(JobStatus.pending)
-    
+
     def completed(self) -> "JobCollection":
         """Get only completed jobs."""
         return self.by_status(JobStatus.completed)
-    
+
     def running(self) -> "JobCollection":
         """Get only running jobs."""
         return self.by_status(JobStatus.running)
-    
+
     def approve_all(self, reason: Optional[str] = None) -> dict:
         """Approve all jobs in this collection."""
         results = {"approved": 0, "failed": 0, "skipped": 0, "errors": []}
@@ -807,7 +805,7 @@ class JobCollection(list[CodeJob]):
                     results["skipped"] += 1
                     results["errors"].append(f"Job {job.short_id} ({job.name}): Already {job.status.value}, skipping")
                     continue
-                    
+
                 if job.approve(reason):
                     results["approved"] += 1
                 else:
@@ -817,7 +815,7 @@ class JobCollection(list[CodeJob]):
                 results["failed"] += 1
                 results["errors"].append(f"Job {job.short_id} ({job.name}): {str(e)}")
         return results
-    
+
     def reject_all(self, reason: Optional[str] = None) -> dict:
         """Reject all jobs in this collection."""
         results = {"rejected": 0, "failed": 0, "skipped": 0, "errors": []}
@@ -828,7 +826,7 @@ class JobCollection(list[CodeJob]):
                     results["skipped"] += 1
                     results["errors"].append(f"Job {job.short_id} ({job.name}): Already {job.status.value}, skipping")
                     continue
-                    
+
                 if job.reject(reason):
                     results["rejected"] += 1
                 else:
@@ -838,19 +836,19 @@ class JobCollection(list[CodeJob]):
                 results["failed"] += 1
                 results["errors"].append(f"Job {job.short_id} ({job.name}): {str(e)}")
         return results
-    
+
     def summary(self) -> dict:
         """Get summary statistics for this collection."""
         status_counts = {}
         for status in JobStatus:
             status_counts[status.value] = len(self.by_status(status))
-        
+
         return {
             "total": len(self),
             "by_status": status_counts,
             "latest": self[-1] if self else None
         }
-    
+
     def refresh(self) -> "JobCollection":
         """
         Refresh job statuses from the server.
@@ -865,13 +863,13 @@ class JobCollection(list[CodeJob]):
                     refreshed_jobs.append(updated_job)
                 else:
                     refreshed_jobs.append(job)
-        
+
         return JobCollection(refreshed_jobs)
-    
+
     def _repr_html_(self):
         """HTML representation for Jupyter notebooks."""
         import html
-        
+
         if not self:
             return """
             <div style="text-align: center; padding: 40px; color: #6b7280; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
@@ -880,12 +878,12 @@ class JobCollection(list[CodeJob]):
                 <div style="font-size: 14px; margin-top: 8px;">Submit a job to get started</div>
             </div>
             """
-        
+
         # Determine collection type for header
         summary = self.summary()
         collection_type = "Code Jobs"
         collection_description = "Manage your code execution jobs"
-        
+
         # Check if this is a filtered collection
         if all(job.status == JobStatus.pending for job in self):
             if all(job._client is not None for job in self):
@@ -900,9 +898,9 @@ class JobCollection(list[CodeJob]):
         elif all(job.status == JobStatus.running for job in self):
             collection_type = "Running Jobs"
             collection_description = "Currently executing jobs"
-            
+
         container_id = f"syft-jobs-{hash(str([job.uid for job in self])) % 10000}"
-        
+
         html_content = f"""
         <style>
         .syft-jobs-container {{
@@ -1152,7 +1150,7 @@ class JobCollection(list[CodeJob]):
             height: 16px;
         }}
         </style>
-        
+
         <div class="syft-jobs-container" id="{container_id}">
             <div class="syft-jobs-header">
                 <div class="syft-jobs-title">
@@ -1162,21 +1160,21 @@ class JobCollection(list[CodeJob]):
                 <p class="syft-jobs-description">{collection_description}</p>
             </div>
             <div class="syft-jobs-controls">
-                <input type="text" class="syft-search-box" placeholder="🔍 Search jobs..." 
+                <input type="text" class="syft-search-box" placeholder="🔍 Search jobs..."
                        onkeyup="filterJobs('{container_id}')">
                 <button class="syft-filter-btn active" onclick="filterByStatus('{container_id}', 'all')">All</button>
                 <button class="syft-filter-btn" onclick="filterByStatus('{container_id}', 'pending')">Pending ({summary['by_status'].get('pending', 0)})</button>
                 <button class="syft-filter-btn" onclick="filterByStatus('{container_id}', 'running')">Running ({summary['by_status'].get('running', 0)})</button>
                 <button class="syft-filter-btn" onclick="filterByStatus('{container_id}', 'completed')">Completed ({summary['by_status'].get('completed', 0)})</button>
         """
-        
+
         # Add batch approval buttons if any jobs can be approved
         if any(job.status == JobStatus.pending and job._client is not None for job in self):
             html_content += f"""
                 <button class="syft-batch-btn" onclick="batchApprove('{container_id}')">Approve Selected</button>
                 <button class="syft-batch-btn reject" onclick="batchReject('{container_id}')">Reject Selected</button>
             """
-        
+
         html_content += """
             </div>
             <div class="syft-jobs-table-container">
@@ -1195,26 +1193,24 @@ class JobCollection(list[CodeJob]):
                     </thead>
                     <tbody>
         """
-        
+
         for i, job in enumerate(self):
             # Format creation time
-            time_display = "Unknown"
+            time_display = "unknown"
             try:
-                from datetime import datetime
-                if job.created_at:
-                    now = datetime.now()
-                    diff = now - job.created_at
-                    if diff.total_seconds() < 60:
-                        time_display = "Just now"
-                    elif diff.total_seconds() < 3600:
-                        time_display = f"{int(diff.total_seconds() / 60)}m ago"
-                    elif diff.total_seconds() < 86400:
-                        time_display = f"{int(diff.total_seconds() / 3600)}h ago"
-                    else:
-                        time_display = f"{int(diff.total_seconds() / 86400)}d ago"
-            except:
+                diff = datetime.now() - job.created_at
+                if diff.total_seconds() < 60:
+                    time_display = "just now"
+                elif diff.total_seconds() < 3600:
+                    time_display = f"{int(diff.total_seconds() / 60)}m ago"
+                elif diff.total_seconds() < 86400:
+                    time_display = f"{int(diff.total_seconds() / 3600)}h ago"
+                else:
+                    time_display = f"{int(diff.total_seconds() / 86400)} days ago"
+            except (TypeError, AttributeError):
+                # Handle cases where created_at is None or invalid
                 pass
-            
+
             # Build tags
             tags_html = ""
             if job.tags:
@@ -1222,7 +1218,7 @@ class JobCollection(list[CodeJob]):
                     tags_html += f'<span class="syft-job-tag">{html.escape(tag)}</span>'
                 if len(job.tags) > 2:
                     tags_html += f'<span class="syft-job-tag">+{len(job.tags)-2}</span>'
-            
+
             # Build action buttons - pass index and collection type
             collection_name = "pending_for_me" if (job.status == JobStatus.pending and job._client is not None) else "jobs_for_others"
             actions_html = ""
@@ -1237,9 +1233,9 @@ class JobCollection(list[CodeJob]):
                     <button class="syft-action-btn" onclick="viewLogs({i}, '{collection_name}')">📜</button>
                     <button class="syft-action-btn" onclick="viewOutput({i}, '{collection_name}')">📁</button>
                 """
-            
+
             html_content += f"""
-                        <tr data-status="{job.status.value}" data-name="{html.escape(job.name.lower())}" 
+                        <tr data-status="{job.status.value}" data-name="{html.escape(job.name.lower())}"
                             data-email="{html.escape(job.requester_email.lower())}" data-index="{i}">
                             <td>
                                 <input type="checkbox" class="syft-checkbox" onchange="updateSelection('{container_id}')">
@@ -1269,7 +1265,7 @@ class JobCollection(list[CodeJob]):
                             </td>
                         </tr>
             """
-        
+
         html_content += f"""
                     </tbody>
                 </table>
@@ -1278,14 +1274,14 @@ class JobCollection(list[CodeJob]):
                 0 jobs selected • {len(self)} total
             </div>
         </div>
-        
+
         <script>
         function filterJobs(containerId) {{
             const searchBox = document.querySelector(`#${{containerId}} .syft-search-box`);
             const table = document.querySelector(`#${{containerId}} .syft-jobs-table tbody`);
             const rows = table.querySelectorAll('tr');
             const searchTerm = searchBox.value.toLowerCase();
-            
+
             let visibleCount = 0;
             rows.forEach(row => {{
                 const name = row.dataset.name || '';
@@ -1294,19 +1290,19 @@ class JobCollection(list[CodeJob]):
                 row.style.display = isVisible ? '' : 'none';
                 if (isVisible) visibleCount++;
             }});
-            
+
             updateSelection(containerId);
         }}
-        
+
         function filterByStatus(containerId, status) {{
             const buttons = document.querySelectorAll(`#${{containerId}} .syft-filter-btn`);
             const table = document.querySelector(`#${{containerId}} .syft-jobs-table tbody`);
             const rows = table.querySelectorAll('tr');
-            
+
             // Update active button
             buttons.forEach(btn => btn.classList.remove('active'));
             event.target.classList.add('active');
-            
+
             let visibleCount = 0;
             rows.forEach(row => {{
                 const jobStatus = row.dataset.status;
@@ -1314,15 +1310,15 @@ class JobCollection(list[CodeJob]):
                 row.style.display = isVisible ? '' : 'none';
                 if (isVisible) visibleCount++;
             }});
-            
+
             updateSelection(containerId);
         }}
-        
+
         function updateSelection(containerId) {{
             const table = document.querySelector(`#${{containerId}} .syft-jobs-table tbody`);
             const rows = table.querySelectorAll('tr');
             const status = document.querySelector(`#${{containerId}}-status`);
-            
+
             let selectedCount = 0;
             let visibleCount = 0;
             rows.forEach(row => {{
@@ -1337,15 +1333,15 @@ class JobCollection(list[CodeJob]):
                     }}
                 }}
             }});
-            
+
             status.textContent = `${{selectedCount}} job(s) selected • ${{visibleCount}} visible`;
         }}
-        
+
                  function batchApprove(containerId) {{
              const reason = prompt("Approval reason for selected jobs:", "Batch approved via Jupyter interface");
              if (reason !== null) {{
                  var code = `q.pending_for_me.approve_all("${{reason.replace(/"/g, '\\"')}}")`;
-                 
+
                  navigator.clipboard.writeText(code).then(() => {{
                      const button = document.querySelector(`#${{containerId}} button[onclick="batchApprove('${{containerId}}')"]`);
                      if (button) {{
@@ -1363,12 +1359,12 @@ class JobCollection(list[CodeJob]):
                  }});
              }}
          }}
-        
+
                  function batchReject(containerId) {{
              const reason = prompt("Rejection reason for selected jobs:", "Batch rejected via Jupyter interface");
              if (reason !== null && reason.trim() !== "") {{
                  var code = `q.pending_for_me.reject_all("${{reason.replace(/"/g, '\\"')}}")`;
-                 
+
                  navigator.clipboard.writeText(code).then(() => {{
                      const button = document.querySelector(`#${{containerId}} button[onclick="batchReject('${{containerId}}')"]`);
                      if (button) {{
@@ -1386,11 +1382,11 @@ class JobCollection(list[CodeJob]):
                  }});
              }}
          }}
-        
+
                  // Simple index-based job actions
          window.reviewJob = function(index, collection) {{
              var code = `q.${{collection}}[${{index}}].review()`;
-             
+
              navigator.clipboard.writeText(code).then(() => {{
                  var buttons = document.querySelectorAll(`button[onclick="reviewJob(${{index}}, '${{collection}}')"]`);
                  buttons.forEach(button => {{
@@ -1407,12 +1403,12 @@ class JobCollection(list[CodeJob]):
                  alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
              }});
          }};
-        
+
                  window.approveJob = function(index, collection) {{
              var reason = prompt("Approval reason (optional):", "Approved via Jupyter interface");
              if (reason !== null) {{
                  var code = `q.${{collection}}[${{index}}].approve("${{reason.replace(/"/g, '\\"')}}")`;
-                 
+
                  navigator.clipboard.writeText(code).then(() => {{
                      var buttons = document.querySelectorAll(`button[onclick="approveJob(${{index}}, '${{collection}}')"]`);
                      buttons.forEach(button => {{
@@ -1430,12 +1426,12 @@ class JobCollection(list[CodeJob]):
                  }});
              }}
          }};
-        
+
                  window.rejectJob = function(index, collection) {{
              var reason = prompt("Rejection reason:", "");
              if (reason !== null && reason.trim() !== "") {{
                  var code = `q.${{collection}}[${{index}}].reject("${{reason.replace(/"/g, '\\"')}}")`;
-                 
+
                  navigator.clipboard.writeText(code).then(() => {{
                      var buttons = document.querySelectorAll(`button[onclick="rejectJob(${{index}}, '${{collection}}')"]`);
                      buttons.forEach(button => {{
@@ -1453,10 +1449,10 @@ class JobCollection(list[CodeJob]):
                  }});
              }}
          }};
-        
+
                  window.viewLogs = function(index, collection) {{
              var code = `q.${{collection}}[${{index}}].get_logs()`;
-             
+
              navigator.clipboard.writeText(code).then(() => {{
                  var buttons = document.querySelectorAll(`button[onclick="viewLogs(${{index}}, '${{collection}}')"]`);
                  buttons.forEach(button => {{
@@ -1473,10 +1469,10 @@ class JobCollection(list[CodeJob]):
                  alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
              }});
          }};
-        
+
         window.viewOutput = function(index, collection) {{
             var code = `q.${{collection}}[${{index}}].get_output()`;
-            
+
             navigator.clipboard.writeText(code).then(() => {{
                 var buttons = document.querySelectorAll(`button[onclick="viewOutput(${{index}}, '${{collection}}')"]`);
                 buttons.forEach(button => {{
@@ -1495,13 +1491,13 @@ class JobCollection(list[CodeJob]):
         }};
         </script>
         """
-        
+
         return html_content
-    
+
     def __repr__(self) -> str:
         if not self:
             return "JobCollection([])"
-        
+
         summary = self.summary()
         status_str = ", ".join([f"{k}: {v}" for k, v in summary["by_status"].items() if v > 0])
         return f"JobCollection({len(self)} jobs - {status_str})"
@@ -1529,4 +1525,4 @@ class QueueConfig(BaseModel):
     queue_name: str = "code-queue"
     max_concurrent_jobs: int = 3
     job_timeout: int = 300  # 5 minutes default
-    cleanup_completed_after: int = 86400  # 24 hours 
+    cleanup_completed_after: int = 86400  # 24 hours

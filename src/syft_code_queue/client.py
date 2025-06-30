@@ -10,77 +10,7 @@ from uuid import UUID
 
 from loguru import logger
 
-try:
-    from syft_core import Client as SyftBoxClient
-except ImportError:
-    # Fallback for tutorial/demo purposes
-    class MockSyftBoxClient:
-        def __init__(self):
-            self.email = self._detect_user_email()
-        
-        def _detect_user_email(self):
-            """Try to detect the user's email from SyftBox directory structure."""
-            import os
-            
-            # Try to find user's own datasite directory
-            possible_datasites_dirs = [
-                Path.home() / "SyftBox" / "datasites",
-                Path("/Users") / os.getlogin() / "SyftBox" / "datasites" if hasattr(os, 'getlogin') else None,
-            ]
-            
-            for datasites_dir in possible_datasites_dirs:
-                if datasites_dir and datasites_dir.exists():
-                    # First try to find liamtrask@gmail.com specifically
-                    liam_email = "liamtrask@gmail.com"
-                    if (datasites_dir / liam_email).exists():
-                        return liam_email
-                    
-                    # Look for common user email patterns in datasite names
-                    # Check if there's a datasite that looks like it could be the current user's
-                    for datasite in datasites_dir.iterdir():
-                        if datasite.is_dir():
-                            datasite_name = datasite.name.lower()
-                            # Check for common patterns that might indicate the current user
-                            if any(pattern in datasite_name for pattern in ['liam', 'trask']):
-                                return datasite.name
-            
-            # Fallback to demo email
-            return "demo@example.com"
-        
-        def app_data(self, app_name):
-            import tempfile
-            from pathlib import Path
-
-            return Path(tempfile.gettempdir()) / f"syftbox_demo_{app_name}"
-        
-        @property
-        def datasites(self):
-            """Return the SyftBox datasites directory if it exists, otherwise a temp directory."""
-            from pathlib import Path
-            import os
-            
-            # Try to find the actual SyftBox directory
-            possible_paths = [
-                Path.home() / "SyftBox" / "datasites",
-                Path("/Users") / os.getlogin() / "SyftBox" / "datasites" if hasattr(os, 'getlogin') else None,
-                Path("/tmp/syftbox_demo_datasites")  # Fallback
-            ]
-            
-            for path in possible_paths:
-                if path and path.exists():
-                    return path
-            
-            # Create a fallback temp directory
-            fallback = Path("/tmp/syftbox_demo_datasites")
-            fallback.mkdir(exist_ok=True)
-            return fallback
-        
-        @classmethod
-        def load(cls):
-            return cls()
-    
-    SyftBoxClient = MockSyftBoxClient
-
+from syft_core import Client as SyftBoxClient
 from .models import CodeJob, JobCreate, JobStatus, QueueConfig
 
 # Import syft-perm for permission management (required)

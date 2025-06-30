@@ -1,0 +1,787 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syft Code Queue - Job Collection Dashboard</title>
+</head>
+<body style="margin: 0; padding: 20px; background-color: #f8fafc;">
+    <h1 style="color: #1f2937; margin-bottom: 24px;">📊 Syft Code Queue - Job Dashboard</h1>
+    <p style="color: #6b7280; margin-bottom: 32px;">Complete job management dashboard with organic-coop styling</p>
+    
+    
+    <div class="syft-job-container">
+        
+    <style>
+    .syft-job-container {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        line-height: 1.6;
+        margin: 0;
+        padding: 0;
+    }
+    
+    .syft-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #ffffff;
+        margin-bottom: 16px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+        transition: all 0.2s ease;
+    }
+    
+    .syft-card:hover {
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+    
+    .syft-card-header {
+        padding: 20px 24px 0 24px;
+    }
+    
+    .syft-card-content {
+        padding: 20px 24px 24px 24px;
+    }
+    
+    .syft-card-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #111827;
+        margin: 0 0 4px 0;
+    }
+    
+    .syft-card-description {
+        color: #6b7280;
+        font-size: 14px;
+        margin: 0 0 16px 0;
+    }
+    
+    .syft-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        text-transform: capitalize;
+    }
+    
+    .syft-badge-pending {
+        border: 1px solid #fde047;
+        background-color: #fefce8;
+        color: #ca8a04;
+    }
+    
+    .syft-badge-approved {
+        border: 1px solid #6ee7b7;
+        background-color: #ecfdf5;
+        color: #047857;
+    }
+    
+    .syft-badge-running {
+        border: 1px solid #93c5fd;
+        background-color: #eff6ff;
+        color: #1d4ed8;
+    }
+    
+    .syft-badge-completed {
+        border: 1px solid #6ee7b7;
+        background-color: #ecfdf5;
+        color: #047857;
+    }
+    
+    .syft-badge-failed {
+        border: 1px solid #fca5a5;
+        background-color: #fef2f2;
+        color: #dc2626;
+    }
+    
+    .syft-badge-rejected {
+        border: 1px solid #fca5a5;
+        background-color: #fef2f2;
+        color: #dc2626;
+    }
+    
+    .syft-btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-decoration: none;
+        border: 1px solid;
+        margin-right: 8px;
+        margin-bottom: 4px;
+    }
+    
+    .syft-btn-approve {
+        border-color: #10b981;
+        color: #047857;
+        background-color: #ecfdf5;
+    }
+    
+    .syft-btn-approve:hover {
+        background-color: #d1fae5;
+        color: #065f46;
+    }
+    
+    .syft-btn-reject {
+        border-color: #ef4444;
+        color: #dc2626;
+        background-color: #fef2f2;
+    }
+    
+    .syft-btn-reject:hover {
+        background-color: #fee2e2;
+        color: #b91c1c;
+    }
+    
+    .syft-btn-secondary {
+        border-color: #d1d5db;
+        color: #374151;
+        background-color: #ffffff;
+    }
+    
+    .syft-btn-secondary:hover {
+        background-color: #f9fafb;
+        color: #111827;
+    }
+    
+    .syft-meta {
+        color: #6b7280;
+        font-size: 13px;
+        margin: 4px 0;
+    }
+    
+    .syft-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 16px;
+        flex-wrap: wrap;
+    }
+    
+    .syft-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 8px 0;
+    }
+    
+    .syft-tag {
+        background-color: #f3f4f6;
+        color: #374151;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 500;
+    }
+    
+    .syft-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 8px;
+    }
+    
+    .syft-collection-header {
+        font-size: 24px;
+        font-weight: 700;
+        color: #111827;
+        margin: 0 0 8px 0;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    
+    .syft-collection-count {
+        background-color: #f3f4f6;
+        color: #374151;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+    }
+    
+    .syft-collection-description {
+        color: #6b7280;
+        font-size: 16px;
+        margin: 0 0 24px 0;
+    }
+    
+    .syft-code-viewer {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 16px;
+        margin: 12px 0;
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-size: 13px;
+        overflow-x: auto;
+    }
+    
+    .syft-code-header {
+        color: #475569;
+        font-weight: 600;
+        margin-bottom: 8px;
+        font-family: inherit;
+    }
+    
+    .syft-empty-state {
+        text-align: center;
+        padding: 48px 24px;
+        color: #6b7280;
+    }
+    
+    .syft-empty-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+    }
+    
+    .syft-grid {
+        display: grid;
+        gap: 16px;
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .syft-job-container {
+            color: #f9fafb;
+        }
+        
+        .syft-card {
+            background: #1f2937;
+            border-color: #374151;
+        }
+        
+        .syft-card-title {
+            color: #f9fafb;
+        }
+        
+        .syft-card-description {
+            color: #9ca3af;
+        }
+        
+        .syft-meta {
+            color: #9ca3af;
+        }
+        
+        .syft-collection-header {
+            color: #f9fafb;
+        }
+        
+        .syft-code-viewer {
+            background-color: #111827;
+            border-color: #374151;
+        }
+        
+        .syft-badge-pending {
+            border-color: #fbbf24;
+            background-color: rgba(251, 191, 36, 0.1);
+            color: #fbbf24;
+        }
+        
+        .syft-badge-approved {
+            border-color: #10b981;
+            background-color: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+        }
+        
+        .syft-badge-completed {
+            border-color: #10b981;
+            background-color: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+        }
+        
+        .syft-badge-failed {
+            border-color: #ef4444;
+            background-color: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+        
+        .syft-badge-rejected {
+            border-color: #ef4444;
+            background-color: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+    }
+    </style>
+    
+        <div>
+            <h1 class="syft-collection-header">
+                Research Jobs Dashboard
+                <span class="syft-collection-count">6</span>
+            </h1>
+            <p class="syft-collection-description">
+                Manage your code execution jobs and requests
+            </p>
+            
+        <div>
+            <h2 class="syft-collection-header">
+                Pending Jobs
+                <span class="syft-collection-count">2</span>
+            </h2>
+            <div class="syft-grid">
+                
+            <div class="syft-card">
+                <div class="syft-card-header">
+                    <div class="syft-header-row">
+                        <div>
+                            <h3 class="syft-card-title">Customer Purchase Analysis</h3>
+                            <p class="syft-card-description">Privacy-preserving analysis of customer purchase patterns using differential privacy techniques</p>
+                            
+                <div class="syft-tags">
+                    <span class="syft-tag">analytics</span> <span class="syft-tag">customer-insights</span> <span class="syft-tag">privacy-safe</span> <span class="syft-tag">finance</span>
+                </div>
+                
+                        </div>
+                        <span class="syft-badge syft-badge-pending">pending</span>
+                    </div>
+                </div>
+                <div class="syft-card-content">
+                    <div class="syft-meta">
+                        <strong>From:</strong> alice@research-institute.org • 
+                        <strong>To:</strong> dataowner@hospital.org • 
+                        <strong>ID:</strong> e0183231
+                    </div>
+                    
+        <div class="syft-actions">
+            <div class="syft-meta">
+                Created 2 hours ago
+            </div>
+            <div>
+                <button class="syft-btn syft-btn-secondary" onclick="reviewJob('e0183231-d8bf-4ecd-8844-bd1c4812e45a')">
+                    👁️ Review Code
+                </button>
+                <button class="syft-btn syft-btn-approve" onclick="approveJob('e0183231-d8bf-4ecd-8844-bd1c4812e45a')">
+                    ✓ Approve
+                </button>
+                <button class="syft-btn syft-btn-reject" onclick="rejectJob('e0183231-d8bf-4ecd-8844-bd1c4812e45a')">
+                    ✗ Reject
+                </button>
+            </div>
+        </div>
+        
+                </div>
+            </div>
+            
+            <div class="syft-card">
+                <div class="syft-card-header">
+                    <div class="syft-header-row">
+                        <div>
+                            <h3 class="syft-card-title">Climate Data Modeling</h3>
+                            <p class="syft-card-description">Advanced climate modeling using federated learning on distributed weather station data</p>
+                            
+                <div class="syft-tags">
+                    <span class="syft-tag">climate</span> <span class="syft-tag">modeling</span> <span class="syft-tag">federated-learning</span> <span class="syft-tag">environment</span>
+                </div>
+                
+                        </div>
+                        <span class="syft-badge syft-badge-pending">pending</span>
+                    </div>
+                </div>
+                <div class="syft-card-content">
+                    <div class="syft-meta">
+                        <strong>From:</strong> frank@climate-research.org • 
+                        <strong>To:</strong> dataowner@hospital.org • 
+                        <strong>ID:</strong> d0e01c2e
+                    </div>
+                    
+        <div class="syft-actions">
+            <div class="syft-meta">
+                Created 2 hours ago
+            </div>
+            <div>
+                <button class="syft-btn syft-btn-secondary" onclick="reviewJob('d0e01c2e-dbac-45bf-ac57-516ece6411b6')">
+                    👁️ Review Code
+                </button>
+                <button class="syft-btn syft-btn-approve" onclick="approveJob('d0e01c2e-dbac-45bf-ac57-516ece6411b6')">
+                    ✓ Approve
+                </button>
+                <button class="syft-btn syft-btn-reject" onclick="rejectJob('d0e01c2e-dbac-45bf-ac57-516ece6411b6')">
+                    ✗ Reject
+                </button>
+            </div>
+        </div>
+        
+                </div>
+            </div>
+            
+            </div>
+        </div>
+        
+        <div>
+            <h2 class="syft-collection-header">
+                Running Jobs
+                <span class="syft-collection-count">1</span>
+            </h2>
+            <div class="syft-grid">
+                
+            <div class="syft-card">
+                <div class="syft-card-header">
+                    <div class="syft-header-row">
+                        <div>
+                            <h3 class="syft-card-title">Medical Image Classification</h3>
+                            <p class="syft-card-description">Training deep learning model on anonymized medical imaging data for diagnostic assistance</p>
+                            
+                <div class="syft-tags">
+                    <span class="syft-tag">machine-learning</span> <span class="syft-tag">healthcare</span> <span class="syft-tag">computer-vision</span> <span class="syft-tag">diagnostics</span>
+                </div>
+                
+                        </div>
+                        <span class="syft-badge syft-badge-running">running</span>
+                    </div>
+                </div>
+                <div class="syft-card-content">
+                    <div class="syft-meta">
+                        <strong>From:</strong> bob@medical-ai.com • 
+                        <strong>To:</strong> dataowner@hospital.org • 
+                        <strong>ID:</strong> db92b8ef
+                    </div>
+                    
+        <div class="syft-actions">
+            <div class="syft-meta">
+                Created 2 hours ago • 
+                Last updated 30 minutes ago
+            </div>
+            <div>
+                <button class="syft-btn syft-btn-secondary" onclick="viewLogs('db92b8ef-f11b-4ade-855a-c03f2311e5da')">📜 View Logs</button>
+            </div>
+        </div>
+        
+                </div>
+            </div>
+            
+            </div>
+        </div>
+        
+        <div>
+            <h2 class="syft-collection-header">
+                Completed Jobs
+                <span class="syft-collection-count">1</span>
+            </h2>
+            <div class="syft-grid">
+                
+            <div class="syft-card">
+                <div class="syft-card-header">
+                    <div class="syft-header-row">
+                        <div>
+                            <h3 class="syft-card-title">Market Sentiment Analysis</h3>
+                            <p class="syft-card-description">NLP analysis of public market sentiment from social media data with privacy protection</p>
+                            
+                <div class="syft-tags">
+                    <span class="syft-tag">nlp</span> <span class="syft-tag">sentiment-analysis</span> <span class="syft-tag">finance</span> <span class="syft-tag">social-media</span>
+                </div>
+                
+                        </div>
+                        <span class="syft-badge syft-badge-completed">completed</span>
+                    </div>
+                </div>
+                <div class="syft-card-content">
+                    <div class="syft-meta">
+                        <strong>From:</strong> charlie@fintech-corp.com • 
+                        <strong>To:</strong> dataowner@hospital.org • 
+                        <strong>ID:</strong> b5f56183
+                    </div>
+                    
+        <div class="syft-actions">
+            <div class="syft-meta">
+                Created 2 hours ago • 
+                Last updated 30 minutes ago
+            </div>
+            <div>
+                <button class="syft-btn syft-btn-secondary" onclick="viewLogs('b5f56183-539a-4606-92dd-0900342f978b')">📜 View Logs</button><button class="syft-btn syft-btn-secondary" onclick="viewOutput('b5f56183-539a-4606-92dd-0900342f978b')">📁 View Output</button>
+            </div>
+        </div>
+        
+                </div>
+            </div>
+            
+            </div>
+        </div>
+        
+        <div>
+            <h2 class="syft-collection-header">
+                Failed Jobs
+                <span class="syft-collection-count">1</span>
+            </h2>
+            <div class="syft-grid">
+                
+            <div class="syft-card">
+                <div class="syft-card-header">
+                    <div class="syft-header-row">
+                        <div>
+                            <h3 class="syft-card-title">Genomic Data Processing</h3>
+                            <p class="syft-card-description">Statistical analysis of genomic sequences for rare disease research</p>
+                            
+                <div class="syft-tags">
+                    <span class="syft-tag">genomics</span> <span class="syft-tag">statistics</span> <span class="syft-tag">rare-diseases</span> <span class="syft-tag">research</span>
+                </div>
+                
+                        </div>
+                        <span class="syft-badge syft-badge-failed">failed</span>
+                    </div>
+                </div>
+                <div class="syft-card-content">
+                    <div class="syft-meta">
+                        <strong>From:</strong> diana@genomics-lab.edu • 
+                        <strong>To:</strong> dataowner@hospital.org • 
+                        <strong>ID:</strong> 41b5e0d5
+                    </div>
+                    
+        <div class="syft-actions">
+            <div class="syft-meta">
+                Created 2 hours ago • 
+                Last updated 30 minutes ago
+            </div>
+            <div>
+                
+            </div>
+        </div>
+        
+                </div>
+            </div>
+            
+            </div>
+        </div>
+        
+        <div>
+            <h2 class="syft-collection-header">
+                Approved Jobs
+                <span class="syft-collection-count">1</span>
+            </h2>
+            <div class="syft-grid">
+                
+            <div class="syft-card">
+                <div class="syft-card-header">
+                    <div class="syft-header-row">
+                        <div>
+                            <h3 class="syft-card-title">Supply Chain Optimization</h3>
+                            <p class="syft-card-description">Optimization algorithms for supply chain efficiency while protecting vendor information</p>
+                            
+                <div class="syft-tags">
+                    <span class="syft-tag">optimization</span> <span class="syft-tag">supply-chain</span> <span class="syft-tag">logistics</span> <span class="syft-tag">efficiency</span>
+                </div>
+                
+                        </div>
+                        <span class="syft-badge syft-badge-approved">approved</span>
+                    </div>
+                </div>
+                <div class="syft-card-content">
+                    <div class="syft-meta">
+                        <strong>From:</strong> eve@logistics-solutions.biz • 
+                        <strong>To:</strong> dataowner@hospital.org • 
+                        <strong>ID:</strong> 4e878739
+                    </div>
+                    
+        <div class="syft-actions">
+            <div class="syft-meta">
+                Created 2 hours ago • 
+                Last updated 30 minutes ago
+            </div>
+            <div>
+                
+            </div>
+        </div>
+        
+                </div>
+            </div>
+            
+            </div>
+        </div>
+        
+        </div>
+        
+    <script>
+    window.reviewJob = function(jobId) {
+        // Use the IPython kernel to call job review
+        var code = `
+import syft_code_queue as q
+job = None
+for j in q.jobs_for_me:
+    if str(j.uid).startswith('${jobId}') or str(j.uid) == '${jobId}':
+        job = j
+        break
+
+if job:
+    print(f"📋 Reviewing Job: {job.name}")
+    print(f"🆔 ID: {job.short_id}")
+    print(f"👤 From: {job.requester_email}")
+    print(f"📝 Description: {job.description or 'No description'}")
+    print(f"🏷️  Tags: {', '.join(job.tags) if job.tags else 'None'}")
+    
+    details = job.review()
+    if details and details.get('code_files'):
+        print(f"\n📁 Code files: {', '.join(details['code_files'])}")
+    
+    # Show code content preview
+    from pathlib import Path
+    if hasattr(job, 'code_folder') and job.code_folder:
+        run_script = Path(job.code_folder) / 'run.sh'
+        if run_script.exists():
+            print("\n🔧 run.sh contents:")
+            print("-" * 40)
+            try:
+                content = run_script.read_text()
+                print(content)
+            except Exception as e:
+                print(f"Error reading file: {e}")
+            print("-" * 40)
+else:
+    print(f"❌ Job {jobId} not found")
+        `;
+        
+        if (window.Jupyter && window.Jupyter.notebook) {
+            window.Jupyter.notebook.kernel.execute(code);
+        } else if (window.IPython && window.IPython.notebook) {
+            window.IPython.notebook.kernel.execute(code);
+        } else {
+            console.log("Jupyter/IPython not available - code:", code);
+        }
+    };
+    
+    window.approveJob = function(jobId) {
+        var reason = prompt("Approval reason (optional):", "Approved via Jupyter interface");
+        if (reason !== null) {  // User didn't cancel
+            var code = `
+import syft_code_queue as q
+job = None
+for j in q.jobs_for_me:
+    if str(j.uid).startswith('${jobId}') or str(j.uid) == '${jobId}':
+        job = j
+        break
+
+if job:
+    success = job.approve("${reason.replace(/"/g, '\"')}")
+    if success:
+        print(f"✅ Approved job: {job.name}")
+        print("🔄 Refresh this view to see updated status")
+    else:
+        print(f"❌ Failed to approve job: {job.name}")
+else:
+    print(f"❌ Job ${jobId} not found")
+            `;
+            
+            if (window.Jupyter && window.Jupyter.notebook) {
+                window.Jupyter.notebook.kernel.execute(code);
+            } else if (window.IPython && window.IPython.notebook) {
+                window.IPython.notebook.kernel.execute(code);
+            }
+        }
+    };
+    
+    window.rejectJob = function(jobId) {
+        var reason = prompt("Rejection reason:", "");
+        if (reason !== null && reason.trim() !== "") {
+            var code = `
+import syft_code_queue as q
+job = None
+for j in q.jobs_for_me:
+    if str(j.uid).startswith('${jobId}') or str(j.uid) == '${jobId}':
+        job = j
+        break
+
+if job:
+    success = job.reject("${reason.replace(/"/g, '\"')}")
+    if success:
+        print(f"🚫 Rejected job: {job.name}")
+        print("🔄 Refresh this view to see updated status")
+    else:
+        print(f"❌ Failed to reject job: {job.name}")
+else:
+    print(f"❌ Job ${jobId} not found")
+            `;
+            
+            if (window.Jupyter && window.Jupyter.notebook) {
+                window.Jupyter.notebook.kernel.execute(code);
+            } else if (window.IPython && window.IPython.notebook) {
+                window.IPython.notebook.kernel.execute(code);
+            }
+        }
+    };
+    
+    window.viewLogs = function(jobId) {
+        var code = `
+import syft_code_queue as q
+job = None
+for j in q.jobs_for_others:
+    if str(j.uid).startswith('${jobId}') or str(j.uid) == '${jobId}':
+        job = j
+        break
+
+if job:
+    logs = job.get_logs()
+    if logs:
+        print(f"📜 Execution logs for {job.name}:")
+        print("=" * 50)
+        print(logs)
+        print("=" * 50)
+    else:
+        print(f"📜 No logs available for {job.name}")
+else:
+    print(f"❌ Job ${jobId} not found")
+        `;
+        
+        if (window.Jupyter && window.Jupyter.notebook) {
+            window.Jupyter.notebook.kernel.execute(code);
+        } else if (window.IPython && window.IPython.notebook) {
+            window.IPython.notebook.kernel.execute(code);
+        }
+    };
+    
+    window.viewOutput = function(jobId) {
+        var code = `
+import syft_code_queue as q
+job = None
+for j in q.jobs_for_others:
+    if str(j.uid).startswith('${jobId}') or str(j.uid) == '${jobId}':
+        job = j
+        break
+
+if job:
+    output_path = job.get_output()
+    if output_path:
+        print(f"📁 Output location for {job.name}: {output_path}")
+        
+        # Try to show output directory contents
+        from pathlib import Path
+        if Path(output_path).exists():
+            print("\n📋 Output files:")
+            for file in Path(output_path).iterdir():
+                if file.is_file():
+                    print(f"  📄 {file.name} ({file.stat().st_size} bytes)")
+                elif file.is_dir():
+                    print(f"  📁 {file.name}/")
+        else:
+            print("⚠️ Output directory does not exist yet")
+    else:
+        print(f"📁 No output path available for {job.name}")
+else:
+    print(f"❌ Job ${jobId} not found")
+        `;
+        
+        if (window.Jupyter && window.Jupyter.notebook) {
+            window.Jupyter.notebook.kernel.execute(code);
+        } else if (window.IPython && window.IPython.notebook) {
+            window.IPython.notebook.kernel.execute(code);
+        }
+    };
+    </script>
+    
+    </div>
+    
+    
+    <div style="margin-top: 32px; padding: 20px; background-color: #ecfdf5; border: 1px solid #10b981; border-radius: 8px;">
+        <h3 style="color: #047857; margin: 0 0 12px 0;">🚀 Ready for Production</h3>
+        <div style="color: #065f46;">
+            <p style="margin: 8px 0;"><strong>📱 Jupyter Integration:</strong> Works seamlessly in Jupyter Lab, Notebook, and VS Code</p>
+            <p style="margin: 8px 0;"><strong>⚡ Interactive Actions:</strong> Real-time job management with JavaScript integration</p>
+            <p style="margin: 8px 0;"><strong>🎨 Beautiful Design:</strong> Matches organic-coop's modern, professional aesthetic</p>
+            <p style="margin: 8px 0;"><strong>🔒 Privacy-First:</strong> Designed for sensitive data workflows</p>
+        </div>
+    </div>
+</body>
+</html>
+    

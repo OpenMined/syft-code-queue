@@ -28,24 +28,22 @@ except ImportError:
     SyftBoxClient = MockSyftBoxClient
 
 from .models import CodeJob, JobStatus, QueueConfig
-from .runner import CodeRunner, SafeCodeRunner
+# Runner imports moved to syft-simple-runner package
 
 
 class CodeQueueServer:
     """Server that processes code execution queue."""
     
     def __init__(self, 
-                 config: Optional[QueueConfig] = None,
-                 runner: Optional[CodeRunner] = None):
+                 config: Optional[QueueConfig] = None):
         """
         Initialize the queue server.
         
         Args:
             config: Queue configuration
-            runner: Code runner instance (defaults to SafeCodeRunner)
         """
         self.config = config or QueueConfig()
-        self.runner = runner or SafeCodeRunner()  # Use safe runner by default
+        # Job execution is now handled by syft-simple-runner
         
         self.syftbox_client = SyftBoxClient.load()
         self.executor = ThreadPoolExecutor(max_workers=self.config.max_concurrent_jobs)
@@ -95,8 +93,8 @@ class CodeQueueServer:
                 # Process pending jobs
                 self._process_pending_jobs()
                 
-                # Execute approved jobs
-                self._execute_approved_jobs()
+                # Log approved jobs (execution handled by syft-simple-runner)
+                self._log_approved_jobs()
                 
                 # Cleanup old jobs
                 self._cleanup_old_jobs()
@@ -122,51 +120,20 @@ class CodeQueueServer:
             logger.info(f"Pending job awaiting approval: {job.name} from {job.requester_email}")
             # All jobs require manual approval - no auto-approval logic here
     
-    def _execute_approved_jobs(self):
-        """Execute jobs that have been approved."""
+    def _log_approved_jobs(self):
+        """Log approved jobs waiting for execution by syft-simple-runner."""
         approved_jobs = self._get_jobs_by_status(JobStatus.approved)
         
-        # Limit concurrent executions
-        running_jobs = self._get_jobs_by_status(JobStatus.running)
-        if len(running_jobs) >= self.config.max_concurrent_jobs:
-            return
+        my_approved = [job for job in approved_jobs if job.target_email == self.email]
         
-        for job in approved_jobs[:self.config.max_concurrent_jobs - len(running_jobs)]:
-            if job.target_email != self.email:
-                continue
-            
-            logger.info(f"Starting execution of job: {job.name}")
-            job.update_status(JobStatus.running)
-            self._save_job(job)
-            
-            # Submit to thread pool
-            future = self.executor.submit(self._execute_job, job)
-            # Don't block - let it run asynchronously
+        if my_approved:
+            logger.info(f"📋 {len(my_approved)} approved job(s) waiting for execution by syft-simple-runner:")
+            for job in my_approved:
+                logger.info(f"   • {job.name} from {job.requester_email}")
+        else:
+            logger.debug("No approved jobs waiting for execution")
     
-    def _execute_job(self, job: CodeJob):
-        """Execute a single job."""
-        try:
-            logger.info(f"Executing job {job.uid}: {job.name}")
-            
-            # Run the job
-            exit_code, stdout, stderr = self.runner.run_job(job)
-            
-            # Update job status based on result
-            if exit_code == 0:
-                job.update_status(JobStatus.completed)
-                logger.info(f"Job {job.uid} completed successfully")
-            else:
-                job.update_status(JobStatus.failed, f"Exit code: {exit_code}")
-                logger.warning(f"Job {job.uid} failed with exit code {exit_code}")
-            
-        except Exception as e:
-            error_msg = f"Job execution error: {e}"
-            job.update_status(JobStatus.failed, error_msg)
-            logger.error(f"Job {job.uid} failed: {error_msg}")
-        
-        finally:
-            # Always save the final job state
-            self._save_job(job)
+    # Job execution is now handled by syft-simple-runner
     
 
     

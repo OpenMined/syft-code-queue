@@ -20,7 +20,17 @@ from syft_perm import set_file_permissions
 
 
 class CodeQueueClient:
-    """Client for interacting with the code queue."""
+    """
+    Client for interacting with the code queue.
+    
+    Cross-Datasite Workflow:
+    1. Job Creation: When a job is submitted, it gets stored in the TARGET's datasite "pending" folder
+    2. Job Review: When someone approves/rejects a job, it moves within THEIR own datasite
+       (from "pending" to "approved"/"rejected" folder in the reviewer's datasite)
+    3. Job Discovery: 
+       - list_all_jobs() finds jobs submitted TO you (in your local datasite)
+       - list_my_jobs() finds jobs submitted BY you (searches across all datasites)
+    """
 
     def __init__(self, syftbox_client: SyftBoxClient, config: QueueConfig):
         """Initialize the client."""
@@ -33,6 +43,10 @@ class CodeQueueClient:
             status_dir = self._get_status_dir(status)
             status_dir.mkdir(parents=True, exist_ok=True)
 
+    def _get_target_queue_dir(self, target_email: str) -> Path:
+        """Get the queue directory for a target email's datasite."""
+        return self.syftbox_client.datasites / target_email / "app_data" / self.queue_name / "jobs"
+
     def _get_status_dir(self, status: JobStatus) -> Path:
         """Get directory for a specific job status."""
         return self._get_queue_dir() / status.value
@@ -43,6 +57,9 @@ class CodeQueueClient:
 
     def _get_job_dir(self, job: CodeJob) -> Path:
         """Get directory for a specific job."""
+        # If this is a cross-datasite job, use the datasite path
+        if hasattr(job, '_datasite_path') and job._datasite_path is not None:
+            return job._datasite_path / job.status.value / str(job.uid)
         return self._get_status_dir(job.status) / str(job.uid)
 
     def _get_job_file(self, job_uid: UUID) -> Optional[Path]:
@@ -418,16 +435,20 @@ class CodeQueueClient:
         job = CodeJob(**job_create.model_dump(), requester_email=self.email)
         job._client = self  # Set the client reference
         
-        # Copy code to queue location
+        # Set up cross-datasite job - save to target's datasite instead of requester's
+        target_queue_dir = self._get_target_queue_dir(target_email)
+        job._datasite_path = target_queue_dir
+        
+        # Copy code to target's queue location
         self._copy_code_to_queue(job)
         
-        # Save job to local queue
+        # Save job to target's datasite queue (pending folder)
         self._save_job(job)
         
         # Set permissions using syft-perm so recipient can access the job
         self._set_job_permissions(job)
         
-        logger.info(f"Submitted job '{name}' to {target_email}")
+        logger.info(f"Submitted job '{name}' to {target_email}'s datasite")
         return job
     
     def get_job(self, job_uid: UUID) -> Optional[CodeJob]:
@@ -450,7 +471,9 @@ class CodeQueueClient:
                     if date_field in data and data[date_field] and isinstance(data[date_field], str):
                         data[date_field] = datetime.fromisoformat(data[date_field])
                 
-                return CodeJob.model_validate(data)
+                job = CodeJob.model_validate(data)
+                job._client = self  # Set client reference
+                return job
         
         # If not found locally, search across all datasites
         logger.debug(f"Job {job_uid} not found locally, searching across all datasites")
@@ -497,11 +520,15 @@ class CodeQueueClient:
         return None
     
     def list_my_jobs(self, limit: int = 50) -> list[CodeJob]:
-        """List jobs submitted by me."""
-        return self.list_jobs(target_email=None, limit=limit)
+        """List jobs submitted by me (searches across all datasites since jobs are stored in target's datasite)."""
+        # Since jobs are now stored in the target's datasite, we need to search across all datasites
+        # to find jobs that I submitted to others
+        return self.list_jobs(target_email=None, limit=limit, search_all_datasites=True)
 
     def list_all_jobs(self, limit: int = 50) -> list[CodeJob]:
-        """List jobs submitted to me."""
+        """List jobs submitted to me (searches local datasite since jobs are now stored in target's datasite)."""
+        # Since jobs are now stored in the target's datasite, jobs submitted to me 
+        # will be in my local datasite
         return self.list_jobs(target_email=self.email, limit=limit)
     
     def get_job_output(self, job_uid: UUID) -> Optional[Path]:
@@ -580,19 +607,36 @@ class CodeQueueClient:
         
         job.update_status(JobStatus.rejected, "Cancelled by requester")
         self._save_job(job)
+        # Invalidate cache so job status reflects the change immediately
+        job.refresh()
         return True
     
     def _copy_code_to_queue(self, job: CodeJob):
-        """Copy code folder to the queue location."""
+        """Copy code folder to the queue location (supports cross-datasite jobs)."""
         job_dir = self._get_job_dir(job)
-        job_dir.mkdir(parents=True, exist_ok=True)
         
-        code_dir = job_dir / "code"
-        if code_dir.exists():
-            shutil.rmtree(code_dir)
-        
-        shutil.copytree(job.code_folder, code_dir)
-        job.code_folder = code_dir  # Update to queue location
+        try:
+            job_dir.mkdir(parents=True, exist_ok=True)
+            
+            code_dir = job_dir / "code"
+            if code_dir.exists():
+                shutil.rmtree(code_dir)
+            
+            shutil.copytree(job.code_folder, code_dir)
+            job.code_folder = code_dir  # Update to queue location
+            
+            # Log where the code was copied
+            if hasattr(job, '_datasite_path') and job._datasite_path is not None:
+                logger.debug(f"Copied code to cross-datasite location: {code_dir}")
+            else:
+                logger.debug(f"Copied code to local location: {code_dir}")
+                
+        except PermissionError as e:
+            logger.error(f"Permission denied copying code to {job_dir}: {e}")
+            raise RuntimeError(f"Cannot submit job - insufficient permissions to create job in target datasite")
+        except Exception as e:
+            logger.error(f"Error copying code to {job_dir}: {e}")
+            raise RuntimeError(f"Failed to copy code: {e}")
 
     def _set_job_permissions(self, job: CodeJob):
         """Set proper permissions for job files so the recipient can see and approve them."""
@@ -643,6 +687,8 @@ class CodeQueueClient:
     def approve_job(self, job_uid: Union[str, UUID], reason: Optional[str] = None) -> bool:
         """
         Approve a job for execution.
+        
+        The job will be moved from pending to approved within the reviewer's own datasite.
 
         Args:
             job_uid: The job's UUID
@@ -668,13 +714,20 @@ class CodeQueueClient:
             logger.warning(f"Cannot approve job {job_uid} with status {job.status}")
             return False
 
-        logger.debug(f"Updating job {job_uid} status from {job.status} to approved")
+        logger.debug(f"Updating job {job_uid} status from {job.status} to approved in reviewer's datasite")
         
         try:
+            # Ensure the job is configured to be saved in the reviewer's own datasite
+            if not hasattr(job, '_datasite_path') or job._datasite_path is None:
+                # If no datasite path set, default to reviewer's own datasite
+                job._datasite_path = self._get_target_queue_dir(self.email)
+            
             job.update_status(JobStatus.approved)
-            logger.debug(f"Saving job {job_uid} with new status")
+            logger.debug(f"Saving approved job {job_uid} to reviewer's datasite")
             self._save_job(job)
-            logger.info(f"Approved job: {job.name}")
+            # Invalidate cache so job status reflects the change immediately
+            job.refresh()
+            logger.info(f"Approved job '{job.name}' - moved to approved folder in {self.email}'s datasite")
             return True
         except Exception as e:
             logger.error(f"Failed to approve job {job_uid}: {e}")
@@ -683,6 +736,8 @@ class CodeQueueClient:
     def reject_job(self, job_uid: Union[str, UUID], reason: Optional[str] = None) -> bool:
         """
         Reject a job.
+        
+        The job will be moved from pending to rejected within the reviewer's own datasite.
 
         Args:
             job_uid: The job's UUID
@@ -703,11 +758,22 @@ class CodeQueueClient:
             logger.warning(f"Cannot reject job {job_uid} with status {job.status}")
             return False
 
-        job.update_status(JobStatus.rejected, reason)
-        self._save_job(job)
+        try:
+            # Ensure the job is configured to be saved in the reviewer's own datasite
+            if not hasattr(job, '_datasite_path') or job._datasite_path is None:
+                # If no datasite path set, default to reviewer's own datasite
+                job._datasite_path = self._get_target_queue_dir(self.email)
 
-        logger.info(f"Rejected job: {job.name}")
-        return True
+            job.update_status(JobStatus.rejected, reason)
+            self._save_job(job)
+            # Invalidate cache so job status reflects the change immediately
+            job.refresh()
+
+            logger.info(f"Rejected job '{job.name}' - moved to rejected folder in {self.email}'s datasite")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reject job {job_uid}: {e}")
+            return False
 
     def list_job_files(self, job_uid: Union[str, UUID]) -> list[str]:
         """
@@ -840,6 +906,74 @@ class CodeQueueClient:
                 structure["directories"].append(relative_path)
 
         return structure
+
+    def list_job_output_files(self, job_uid: Union[str, UUID]) -> list[str]:
+        """
+        List all files in a job's output directory.
+
+        Args:
+            job_uid: The job's UUID
+
+        Returns:
+            List of relative file paths in the job's output directory
+        """
+        job = self.get_job(job_uid)
+        if not job or not job.output_folder:
+            return []
+
+        output_dir = Path(job.output_folder)
+        if not output_dir.exists():
+            return []
+
+        files = []
+        try:
+            for item in output_dir.rglob("*"):
+                if item.is_file():
+                    # Get relative path from the output directory
+                    relative_path = item.relative_to(output_dir)
+                    files.append(str(relative_path))
+        except Exception as e:
+            logger.warning(f"Error listing output files for job {job_uid}: {e}")
+            return []
+        
+        return sorted(files)
+
+    def read_job_output_file(self, job_uid: Union[str, UUID], filename: str) -> Optional[str]:
+        """
+        Read the contents of a specific file in a job's output directory.
+
+        Args:
+            job_uid: The job's UUID
+            filename: Relative path to the file within the output directory
+
+        Returns:
+            File contents as string, or None if file doesn't exist
+        """
+        job = self.get_job(job_uid)
+        if not job or not job.output_folder:
+            return None
+
+        output_dir = Path(job.output_folder)
+        file_path = output_dir / filename
+
+        # Security check: ensure the file is within the output directory
+        try:
+            file_path.resolve().relative_to(output_dir.resolve())
+        except ValueError:
+            logger.warning(f"Attempted to access file outside output directory: {filename}")
+            return None
+
+        if not file_path.exists() or not file_path.is_file():
+            return None
+
+        try:
+            return file_path.read_text(encoding='utf-8')
+        except UnicodeDecodeError:
+            # For binary files, return a placeholder
+            return f"<Binary file: {filename}>"
+        except Exception as e:
+            logger.warning(f"Error reading output file {filename}: {e}")
+            return None
 
 
 def create_client(target_email: str = None, **config_kwargs) -> CodeQueueClient:

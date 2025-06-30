@@ -24,7 +24,12 @@ class JobStatus(str, enum.Enum):
 
 
 class CodeJob(BaseModel):
-    """Represents a code execution job in the queue."""
+    """
+    Represents a code execution job in the queue.
+    
+    This is a file-backed object - mutable attributes like status, updated_at, etc.
+    always read from the current file state rather than cached in-memory values.
+    """
 
     # Core identifiers
     uid: UUID = Field(default_factory=uuid4)
@@ -38,38 +43,224 @@ class CodeJob(BaseModel):
     code_folder: Path  # Local path to code folder
     description: Optional[str] = None
 
-    # Status and timing
-    status: JobStatus = JobStatus.pending
+    # Immutable metadata
     created_at: datetime = Field(default_factory=datetime.now)
+    tags: list[str] = Field(default_factory=list)
+
+    # Mutable fields (these store initial/fallback values)
+    status: JobStatus = JobStatus.pending
     updated_at: datetime = Field(default_factory=datetime.now)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-
-    # Results
     output_folder: Optional[Path] = None
     error_message: Optional[str] = None
     exit_code: Optional[int] = None
-    logs: Optional[str] = None  # Execution logs (stdout/stderr)
-
-    # Metadata
-    tags: list[str] = Field(default_factory=list)
+    logs: Optional[str] = None
 
     # Internal references (private attributes)
     _client: Optional["CodeQueueClient"] = PrivateAttr(default=None)
     _datasite_path: Optional[Path] = PrivateAttr(default=None)  # Track where this job is actually stored
+    _cached_data: Optional[dict] = PrivateAttr(default=None)  # Cache for file data
+    _last_reload: Optional[datetime] = PrivateAttr(default=None)  # Track last reload time
+    _file_backed_fields: set[str] = PrivateAttr(default={"status", "updated_at", "started_at", "completed_at", "output_folder", "error_message", "exit_code", "logs"})
+
+    def model_post_init(self, __context):
+        """Initialize private attributes after model validation."""
+        # Ensure private attributes are initialized after model validation
+        if not hasattr(self, '_file_backed_fields') or self._file_backed_fields is None:
+            self._file_backed_fields = {"status", "updated_at", "started_at", "completed_at", "output_folder", "error_message", "exit_code", "logs"}
+        if not hasattr(self, '_client'):
+            self._client = None
+        if not hasattr(self, '_datasite_path'):
+            self._datasite_path = None
+        if not hasattr(self, '_cached_data'):
+            self._cached_data = None
+        if not hasattr(self, '_last_reload'):
+            self._last_reload = None
+
+    def __getattribute__(self, name: str):
+        """Override attribute access to provide file-backed properties for mutable fields."""
+        # Get the actual value first using object.__getattribute__ to avoid recursion
+        if name in ("_file_backed_fields", "_client", "_reload_from_file", "_get_file_backed_value", "model_fields", "model_config", "client"):
+            return object.__getattribute__(self, name)
+        
+        # Check if this is a file-backed field
+        # Use a hardcoded list to avoid private attribute access issues
+        file_backed_fields = {"status", "updated_at", "started_at", "completed_at", "output_folder", "error_message", "exit_code", "logs"}
+        if name in file_backed_fields:
+            try:
+                return self._get_file_backed_value(name)
+            except (AttributeError, TypeError):
+                # If file-backed access fails, fall back to normal access
+                pass
+        
+        # For all other attributes, use normal access
+        return object.__getattribute__(self, name)
+
+    @property
+    def client(self) -> Optional["CodeQueueClient"]:
+        """Get the client reference."""
+        return self._client
+
+    @client.setter
+    def client(self, value: Optional["CodeQueueClient"]):
+        """Set the client reference."""
+        self._client = value
+
+    def _get_file_backed_value(self, field_name: str):
+        """Get the current value of a field from file."""
+        data = self._reload_from_file()
+        
+        if field_name == "status":
+            status_str = data.get("status", "pending")
+            try:
+                return JobStatus(status_str)
+            except ValueError:
+                return JobStatus.pending
+        elif field_name == "updated_at":
+            updated_str = data.get("updated_at")
+            if updated_str:
+                try:
+                    return datetime.fromisoformat(updated_str)
+                except (ValueError, TypeError):
+                    pass
+            return object.__getattribute__(self, "updated_at")
+        elif field_name in ("started_at", "completed_at"):
+            time_str = data.get(field_name)
+            if time_str:
+                try:
+                    return datetime.fromisoformat(time_str)
+                except (ValueError, TypeError):
+                    pass
+            return None
+        elif field_name == "output_folder":
+            output_str = data.get("output_folder")
+            if output_str:
+                try:
+                    return Path(output_str)
+                except (ValueError, TypeError):
+                    pass
+            return None
+        else:
+            # For other fields (error_message, exit_code, logs), return direct value
+            return data.get(field_name)
+
+    def _reload_from_file(self, force: bool = False) -> dict:
+        """
+        Reload job data from the metadata.json file.
+        
+        Args:
+            force: Force reload even if recently cached
+            
+        Returns:
+            Dictionary of job data from file
+        """
+        # Check if we have a recent cache (within 1 second) and not forcing reload
+        now = datetime.now()
+        if (not force and 
+            self._cached_data is not None and 
+            self._last_reload is not None and 
+            (now - self._last_reload).total_seconds() < 1.0):
+            return self._cached_data
+
+        if self._client is None:
+            # Return current in-memory values if no client available
+            return self._get_current_values_dict()
+
+        try:
+            # Read job data directly from metadata.json file to avoid circular dependency
+            import json
+            from uuid import UUID
+            
+            # Find the job file using client's methods
+            job_file = self._client._get_job_file(self.uid)
+            if not job_file or not job_file.exists():
+                return self._get_current_values_dict()
+            
+            # Read raw data from file
+            with open(job_file) as f:
+                raw_data = json.load(f)
+            
+            # Extract the fields we care about for live updates
+            data = {
+                "status": raw_data.get("status", "pending"),
+                "updated_at": raw_data.get("updated_at"),
+                "started_at": raw_data.get("started_at"),
+                "completed_at": raw_data.get("completed_at"),
+                "output_folder": raw_data.get("output_folder"),
+                "error_message": raw_data.get("error_message"),
+                "exit_code": raw_data.get("exit_code"),
+                "logs": raw_data.get("logs")
+            }
+            
+            # Cache the data
+            self._cached_data = data
+            self._last_reload = now
+            
+            return data
+            
+        except Exception:
+            # If reload fails, return current in-memory values
+            return self._get_current_values_dict()
+
+    def _get_current_values_dict(self) -> dict:
+        """Get current in-memory values as a dictionary."""
+        # Use object.__getattribute__ to avoid recursion through our custom __getattribute__
+        status = object.__getattribute__(self, "status")
+        updated_at = object.__getattribute__(self, "updated_at")
+        started_at = object.__getattribute__(self, "started_at")
+        completed_at = object.__getattribute__(self, "completed_at")
+        output_folder = object.__getattribute__(self, "output_folder")
+        error_message = object.__getattribute__(self, "error_message")
+        exit_code = object.__getattribute__(self, "exit_code")
+        logs = object.__getattribute__(self, "logs")
+        
+        return {
+            "status": status.value if hasattr(status, 'value') else str(status),
+            "updated_at": updated_at.isoformat() if updated_at else None,
+            "started_at": started_at.isoformat() if started_at else None,
+            "completed_at": completed_at.isoformat() if completed_at else None,
+            "output_folder": str(output_folder) if output_folder else None,
+            "error_message": error_message,
+            "exit_code": exit_code,
+            "logs": logs
+        }
+
+    def refresh(self) -> "CodeJob":
+        """Force refresh all file-backed properties from disk."""
+        self._cached_data = None
+        self._last_reload = None
+        # Trigger a reload
+        self._reload_from_file(force=True)
+        return self
 
     def update_status(self, new_status: JobStatus, error_message: Optional[str] = None):
-        """Update job status with timestamp."""
-        self.status = new_status
-        self.updated_at = datetime.now()
+        """Update job status with timestamp and save to file."""
+        now = datetime.now()
+        
+        # Update the model fields directly (using object.__setattr__ to bypass our custom __getattribute__)
+        object.__setattr__(self, "status", new_status)
+        object.__setattr__(self, "updated_at", now)
 
         if new_status == JobStatus.running:
-            self.started_at = datetime.now()
+            object.__setattr__(self, "started_at", now)
         elif new_status in (JobStatus.completed, JobStatus.failed, JobStatus.rejected):
-            self.completed_at = datetime.now()
+            object.__setattr__(self, "completed_at", now)
 
         if error_message:
-            self.error_message = error_message
+            object.__setattr__(self, "error_message", error_message)
+
+        # Save changes to file via client
+        if self._client:
+            try:
+                self._client._save_job(self)
+            except Exception:
+                # If save fails, we'll still have updated the in-memory values
+                pass
+        
+        # Invalidate cache so next property access reads fresh data
+        self._cached_data = None
+        self._last_reload = None
 
     @property
     def is_terminal(self) -> bool:
@@ -103,9 +294,9 @@ class CodeJob(BaseModel):
 
         success = self._client.approve_job(str(self.uid), reason)
         if success:
-            # Update local status immediately for better UX
-            self.status = JobStatus.approved
-            self.updated_at = datetime.now()
+            # Invalidate cache so next property access reads the updated status from file
+            self._cached_data = None
+            self._last_reload = None
         return success
 
     def reject(self, reason: Optional[str] = None) -> bool:
@@ -123,16 +314,16 @@ class CodeJob(BaseModel):
 
         success = self._client.reject_job(str(self.uid), reason)
         if success:
-            # Update local status immediately for better UX
-            self.status = JobStatus.rejected
-            self.updated_at = datetime.now()
+            # Invalidate cache so next property access reads the updated status from file
+            self._cached_data = None
+            self._last_reload = None
         return success
 
     def deny(self, reason: Optional[str] = None) -> bool:
         """Alias for reject."""
         return self.reject(reason)
 
-    def review(self) -> Optional[dict]:
+    def get_review_data(self) -> Optional[dict]:
         """Get detailed review information for this job."""
         if self._client is None:
             raise RuntimeError("Job not connected to DataOwner API - cannot review")
@@ -170,9 +361,10 @@ class CodeJob(BaseModel):
 
     def get_logs(self) -> Optional[str]:
         """Get the execution logs for this job."""
-        # First try to return the logs field if it exists
-        if self.logs is not None:
-            return self.logs
+        # First try to return the current logs from file
+        current_logs = self.logs
+        if current_logs is not None:
+            return current_logs
             
         # If no logs field, try to get from client
         if self._client is None:
@@ -203,6 +395,18 @@ class CodeJob(BaseModel):
             raise RuntimeError("Job not connected to API - cannot get code structure")
         return self._client.get_job_code_structure(str(self.uid))
 
+    def list_output_files(self) -> list[str]:
+        """List all files in the job's output directory."""
+        if self._client is None:
+            raise RuntimeError("Job not connected to API - cannot list output files")
+        return self._client.list_job_output_files(str(self.uid))
+
+    def read_output_file(self, filename: str) -> Optional[str]:
+        """Read the contents of a specific file in the job's output directory."""
+        if self._client is None:
+            raise RuntimeError("Job not connected to API - cannot read output file")
+        return self._client.read_job_output_file(str(self.uid), filename)
+
     def review(self):
         """Show interactive filesystem UI for code review."""
         if self._client is None:
@@ -210,6 +414,15 @@ class CodeJob(BaseModel):
         
         # Return the interactive filesystem widget
         return FilesystemReviewWidget(self)
+
+    @property
+    def output_viewer(self):
+        """Show interactive filesystem UI for viewing job output files."""
+        if self._client is None:
+            raise RuntimeError("Job not connected to API - cannot view output")
+        
+        # Return the interactive output viewer widget
+        return OutputViewerWidget(self)
 
     def _repr_html_(self):
         """HTML representation for Jupyter notebooks."""
@@ -369,7 +582,11 @@ class CodeJob(BaseModel):
         </div>
         """
 
-        return f"""
+        # Add unique timestamp to prevent Jupyter caching
+        import time
+        timestamp = str(int(time.time() * 1000))
+        
+        html_content = f"""
     <div class="syft-job-container">
 
     <style>
@@ -625,6 +842,9 @@ class CodeJob(BaseModel):
 
     </div>
     """
+        
+        # Add unique comment to force Jupyter to treat this as new content
+        return f"<!-- refresh-{timestamp}-{self.uid} -->\n{html_content}"
 
     def __repr__(self) -> str:
         return f"CodeJob(name='{self.name}', status='{self.status}', id='{self.short_id}')"
@@ -1594,7 +1814,13 @@ class JobCollection(list[CodeJob]):
         }};
         """
 
-        return html_content
+        # Add unique timestamp to prevent Jupyter caching
+        import time
+        timestamp = str(int(time.time() * 1000))
+        collection_id = hash(str([job.uid for job in self])) % 10000
+        
+        # Add unique comment to force Jupyter to treat this as new content
+        return f"<!-- refresh-{timestamp}-collection-{collection_id} -->\n{html_content}"
 
     def __repr__(self) -> str:
         if not self:
@@ -1638,13 +1864,16 @@ class FilesystemReviewWidget:
     
     def __init__(self, job: "CodeJob"):
         self.job = job
-        self._html_content = None
     
     def _repr_html_(self):
         """Return HTML for Jupyter display."""
-        if self._html_content is None:
-            self._html_content = self._create_filesystem_ui()
-        return self._html_content
+        # Always regenerate HTML to ensure fresh content for each job
+        # Add unique timestamp to prevent Jupyter caching
+        import time
+        timestamp = str(int(time.time() * 1000))
+        html = self._create_filesystem_ui()
+        # Add unique comment to force Jupyter to treat this as new content
+        return f"<!-- refresh-{timestamp}-{self.job.uid} -->\n{html}"
     
     def _create_filesystem_ui(self):
         """Create the interactive filesystem UI."""
@@ -2117,5 +2346,340 @@ else:
             return '🐳'
         elif filename.startswith('run.'):
             return '🚀'
+        else:
+            return '📄'
+
+
+class OutputViewerWidget:
+    """Interactive output filesystem widget for viewing job results in Jupyter."""
+    
+    def __init__(self, job: "CodeJob"):
+        self.job = job
+    
+    def _repr_html_(self):
+        """Return HTML for Jupyter display."""
+        # Always regenerate HTML to ensure fresh content for each job
+        # Add unique timestamp to prevent Jupyter caching
+        import time
+        timestamp = str(int(time.time() * 1000))
+        html = self._create_output_ui()
+        # Add unique comment to force Jupyter to treat this as new content
+        return f"<!-- refresh-{timestamp}-{self.job.uid} -->\n{html}"
+    
+    def _create_output_ui(self):
+        """Create the interactive output filesystem UI."""
+        import html
+        
+        # Check if job has output folder
+        if not self.job.output_folder:
+            return f"""
+            <div style="padding: 20px; color: #6c757d; border: 1px solid #dee2e6; border-radius: 8px; background: #f8f9fa;">
+                <h3>📁 No Output Available</h3>
+                <p>This job doesn't have an output folder configured yet.</p>
+                <p><strong>Job Status:</strong> {self.job.status.value}</p>
+            </div>
+            """
+        
+        # Get file list
+        try:
+            files = self.job.list_output_files()
+        except Exception as e:
+            return f"""
+            <div style="padding: 20px; color: #dc3545; border: 1px solid #dc3545; border-radius: 8px; background: #f8d7da;">
+                <h3>❌ Unable to load output files</h3>
+                <p>Error: {html.escape(str(e))}</p>
+                <p><strong>Output Path:</strong> {html.escape(str(self.job.output_folder))}</p>
+            </div>
+            """
+        
+        if not files:
+            return f"""
+            <div style="padding: 20px; color: #6c757d; border: 1px solid #dee2e6; border-radius: 8px; background: #f8f9fa;">
+                <h3>📁 No Output Files Found</h3>
+                <p>The job output directory exists but contains no files.</p>
+                <p><strong>Output Path:</strong> {html.escape(str(self.job.output_folder))}</p>
+                <p><strong>Job Status:</strong> {self.job.status.value}</p>
+            </div>
+            """
+        
+        # Sort files alphabetically
+        sorted_files = sorted(files)
+        
+        # Build file list HTML
+        files_html = ""
+        for filename in sorted_files:
+            icon = self._get_file_type(filename)
+            files_html += f"""
+                <div class="file-item" onclick="loadOutputFile('{filename}')" data-filename="{filename}">
+                    <span class="file-icon">{icon}</span>
+                    <span class="file-name">{html.escape(filename)}</span>
+                </div>
+            """
+        
+        # Pre-load all file contents for the JavaScript
+        file_contents = {}
+        for filename in sorted_files:
+            try:
+                content = self.job.read_output_file(filename)
+                if content:
+                    file_contents[filename] = content
+                else:
+                    file_contents[filename] = "❌ Could not read file content"
+            except Exception as e:
+                file_contents[filename] = f"❌ Error reading file: {str(e)}"
+        
+        # Get first file content for initial display
+        first_file = sorted_files[0] if sorted_files else None
+        initial_content = ""
+        if first_file and first_file in file_contents:
+            initial_content = html.escape(file_contents[first_file])
+        
+        # Convert file contents to JavaScript object
+        import json
+        file_contents_js = json.dumps(file_contents)
+        
+        return f"""
+        <div class="output-viewer-container">
+            <style>
+            .output-viewer-container {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                border: 1px solid #e1e5e9;
+                border-radius: 12px;
+                overflow: hidden;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 16px 0;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            }}
+            
+            .output-header {{
+                padding: 20px 24px;
+                color: white;
+                background: rgba(255,255,255,0.2);
+                backdrop-filter: blur(10px);
+                border-bottom: 1px solid rgba(255,255,255,0.2);
+            }}
+            
+            .output-title {{
+                font-size: 20px;
+                font-weight: 700;
+                margin: 0 0 8px 0;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }}
+            
+            .output-meta {{
+                font-size: 14px;
+                opacity: 0.9;
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                margin: 8px 0 0 0;
+            }}
+            
+            .output-content {{
+                display: flex;
+                height: 500px;
+                background: white;
+            }}
+            
+            .file-list {{
+                width: 280px;
+                border-right: 1px solid #e1e5e9;
+                background: #f8fafc;
+                overflow-y: auto;
+            }}
+            
+            .file-list-header {{
+                padding: 16px;
+                background: #f1f5f9;
+                border-bottom: 1px solid #e1e5e9;
+                font-weight: 600;
+                color: #475569;
+                font-size: 14px;
+            }}
+            
+            .file-item {{
+                padding: 12px 16px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                border-bottom: 1px solid #f1f5f9;
+                transition: all 0.2s ease;
+            }}
+            
+            .file-item:hover {{
+                background: #e2e8f0;
+            }}
+            
+            .file-item.active {{
+                background: #3b82f6;
+                color: white;
+            }}
+            
+            .file-icon {{
+                font-size: 16px;
+                min-width: 20px;
+            }}
+            
+            .file-name {{
+                font-size: 14px;
+                font-weight: 500;
+            }}
+            
+            .content-viewer {{
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+            }}
+            
+            .content-header {{
+                padding: 16px 20px;
+                background: #f8fafc;
+                border-bottom: 1px solid #e1e5e9;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }}
+            
+            .content-title {{
+                font-weight: 600;
+                color: #1e293b;
+                font-size: 14px;
+            }}
+            
+            .content-meta {{
+                font-size: 12px;
+                color: #64748b;
+            }}
+            
+            .content-body {{
+                flex: 1;
+                overflow: auto;
+                padding: 0;
+            }}
+            
+            .content-code {{
+                padding: 20px;
+                font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+                font-size: 13px;
+                line-height: 1.6;
+                white-space: pre-wrap;
+                margin: 0;
+                background: #ffffff;
+                color: #1e293b;
+                border: none;
+                min-height: 100%;
+            }}
+            </style>
+            
+            <div class="output-header">
+                <div class="output-title">
+                    📁 Job Output: {html.escape(self.job.name)}
+                    <span style="background: rgba(255,255,255,0.2); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 500;">{len(files)} files</span>
+                </div>
+                <div class="output-meta">
+                    📂 {html.escape(str(self.job.output_folder))}
+                    • Status: {self.job.status.value}
+                </div>
+            </div>
+            
+            <div class="output-content">
+                <div class="file-list">
+                    <div class="file-list-header">📄 Output Files ({len(files)})</div>
+                    {files_html}
+                </div>
+                
+                <div class="content-viewer">
+                    <div class="content-header">
+                        <div class="content-title" id="current-output-file">{html.escape(first_file) if first_file else 'No file selected'}</div>
+                        <div class="content-meta" id="output-file-meta"></div>
+                    </div>
+                    <div class="content-body">
+                        <pre class="content-code" id="output-file-content">{initial_content}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <script>
+        let outputJobUid = '{self.job.uid}';
+        let outputFiles = {json.dumps(sorted_files)};
+        let outputFileContents = {file_contents_js};
+        
+        function loadOutputFile(filename) {{
+            console.log('loadOutputFile called with filename:', filename);
+            
+            // Update active file styling
+            document.querySelectorAll('.file-item').forEach(item => {{
+                item.classList.remove('active');
+            }});
+            document.querySelector(`[data-filename="${{filename}}"]`).classList.add('active');
+            
+            // Update header
+            document.getElementById('current-output-file').textContent = filename;
+            
+            // Get file content from pre-loaded data
+            let content = outputFileContents[filename];
+            
+            if (content) {{
+                // Display the actual file content
+                document.getElementById('output-file-content').textContent = content;
+                
+                // Update metadata
+                let lines = content.split('\\n').length;
+                let chars = content.length;
+                document.getElementById('output-file-meta').textContent = `${{lines}} lines • ${{chars}} characters`;
+            }} else {{
+                document.getElementById('output-file-content').textContent = 'File content not available.';
+                document.getElementById('output-file-meta').textContent = 'Content not loaded';
+            }}
+        }}
+        
+        // Initialize first file as active
+        if (outputFiles.length > 0) {{
+            let firstFile = outputFiles[0];
+            document.querySelector(`[data-filename="${{firstFile}}"]`).classList.add('active');
+            
+            // Show metadata for the first file
+            let firstContent = outputFileContents[firstFile];
+            if (firstContent) {{
+                let lines = firstContent.split('\\n').length;
+                let chars = firstContent.length;
+                document.getElementById('output-file-meta').textContent = `${{lines}} lines • ${{chars}} characters`;
+            }}
+        }}
+        </script>
+        """
+
+    def _get_file_type(self, filename: str) -> str:
+        """Get emoji icon for file type."""
+        if filename.endswith('.py'):
+            return '🐍'
+        elif filename.endswith(('.sh', '.bash')):
+            return '💻'
+        elif filename.endswith(('.txt', '.md')):
+            return '📝'
+        elif filename.endswith(('.yml', '.yaml')):
+            return '⚙️'
+        elif filename.endswith('.json'):
+            return '📋'
+        elif filename.endswith(('.csv', '.tsv')):
+            return '📊'
+        elif filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg')):
+            return '🖼️'
+        elif filename.endswith(('.pdf')):
+            return '📄'
+        elif filename.endswith(('.log')):
+            return '📜'
+        elif filename.endswith(('.html', '.htm')):
+            return '🌐'
+        elif filename.endswith(('.xml')):
+            return '📋'
+        elif filename.startswith('output'):
+            return '📤'
+        elif filename.startswith('result'):
+            return '🎯'
         else:
             return '📄'

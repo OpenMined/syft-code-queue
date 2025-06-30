@@ -38,14 +38,24 @@ class CodeQueueClient:
         self.queue_name = config.queue_name
         self.email = syftbox_client.email
 
-        # Create status directories
+        # Create status directories with proper permissions
+        logger.debug(f"Initializing syft-code-queue for {self.email}")
+        
         for status in JobStatus:
             status_dir = self._get_status_dir(status)
-            status_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Create syftperm file for pending folder to allow cross-datasite writes
-            if status == JobStatus.pending:
-                self._create_pending_syftperm(status_dir)
+            try:
+                status_dir.mkdir(parents=True, exist_ok=True)
+                logger.debug(f"Created status directory: {status_dir}")
+                
+                # Create syftperm file for pending folder to allow cross-datasite writes
+                if status == JobStatus.pending:
+                    self._create_pending_syftperm(status_dir)
+                    logger.info(f"Initialized pending directory with cross-datasite permissions: {status_dir}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to initialize status directory {status_dir}: {e}")
+                # Don't fail completely - try to continue with other directories
+                continue
 
     def _get_target_queue_dir(self, target_email: str) -> Path:
         """Get the queue directory for a target email's datasite."""
@@ -63,9 +73,8 @@ class CodeQueueClient:
         """Create syftperm file for pending directory to allow cross-datasite writes."""
         syftperm_file = pending_dir / ".syftperm"
         
-        # Only create if it doesn't exist to avoid overwriting custom permissions
-        if not syftperm_file.exists():
-            syftperm_content = """rules:
+        # Required syftperm content for cross-datasite writes
+        required_syftperm_content = """rules:
 - pattern: '**'
   access:
     read:
@@ -73,12 +82,37 @@ class CodeQueueClient:
     write:
     - '*'
 """
-            try:
+        
+        try:
+            # Always ensure the pending directory exists
+            pending_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Check if syftperm file exists and has correct content
+            needs_creation = True
+            if syftperm_file.exists():
+                try:
+                    existing_content = syftperm_file.read_text().strip()
+                    required_content = required_syftperm_content.strip()
+                    if existing_content == required_content:
+                        needs_creation = False
+                        logger.debug(f"Correct .syftperm file already exists in {pending_dir}")
+                    else:
+                        logger.info(f"Updating .syftperm file in {pending_dir} with correct permissions")
+                except Exception as e:
+                    logger.warning(f"Could not read existing .syftperm file in {pending_dir}: {e}")
+            
+            # Create or update the syftperm file if needed
+            if needs_creation:
                 with open(syftperm_file, 'w') as f:
-                    f.write(syftperm_content)
-                logger.debug(f"Created .syftperm file for pending directory: {pending_dir}")
-            except Exception as e:
-                logger.warning(f"Failed to create .syftperm file in {pending_dir}: {e}")
+                    f.write(required_syftperm_content)
+                logger.info(f"Created/updated .syftperm file for pending directory: {pending_dir}")
+                
+        except PermissionError as e:
+            logger.error(f"Permission denied creating .syftperm file in {pending_dir}: {e}")
+            raise RuntimeError(f"Cannot create syftperm file - insufficient permissions: {e}")
+        except Exception as e:
+            logger.error(f"Failed to create .syftperm file in {pending_dir}: {e}")
+            raise RuntimeError(f"Failed to setup pending directory permissions: {e}")
 
     def _ensure_target_pending_directory(self, target_email: str):
         """Ensure the target's pending directory exists with proper syftperm for cross-datasite writes."""
@@ -86,13 +120,11 @@ class CodeQueueClient:
         pending_dir = target_queue_dir / JobStatus.pending.value
         
         try:
-            # Create the pending directory if it doesn't exist
-            pending_dir.mkdir(parents=True, exist_ok=True)
-            # Ensure syftperm file exists for cross-datasite writes
+            # Create pending directory and syftperm file (handles both directory creation and permissions)
             self._create_pending_syftperm(pending_dir)
             logger.debug(f"Ensured pending directory exists with permissions for {target_email}")
         except Exception as e:
-            logger.warning(f"Failed to ensure pending directory for {target_email}: {e}")
+            logger.error(f"Failed to ensure pending directory for {target_email}: {e}")
             raise RuntimeError(f"Cannot set up pending directory for {target_email}: {e}")
 
     def _get_job_dir(self, job: CodeJob) -> Path:

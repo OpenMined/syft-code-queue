@@ -461,6 +461,138 @@ class CodeQueueClient:
         logger.info(f"Rejected job: {job.name}")
         return True
 
+    def list_job_files(self, job_uid: Union[str, UUID]) -> list[str]:
+        """
+        List all files in a job's code directory.
+
+        Args:
+            job_uid: The job's UUID
+
+        Returns:
+            List of relative file paths in the job's code directory
+        """
+        job = self.get_job(job_uid)
+        if not job:
+            return []
+
+        code_dir = self._get_job_dir(job) / "code"
+        if not code_dir.exists():
+            return []
+
+        files = []
+        for item in code_dir.rglob("*"):
+            if item.is_file():
+                # Get relative path from the code directory
+                relative_path = item.relative_to(code_dir)
+                files.append(str(relative_path))
+        
+        return sorted(files)
+
+    def read_job_file(self, job_uid: Union[str, UUID], filename: str) -> Optional[str]:
+        """
+        Read the contents of a specific file in a job's code directory.
+
+        Args:
+            job_uid: The job's UUID
+            filename: Relative path to the file within the code directory
+
+        Returns:
+            File contents as string, or None if file doesn't exist
+        """
+        job = self.get_job(job_uid)
+        if not job:
+            return None
+
+        code_dir = self._get_job_dir(job) / "code"
+        file_path = code_dir / filename
+
+        # Security check: ensure the file is within the code directory
+        try:
+            file_path.resolve().relative_to(code_dir.resolve())
+        except ValueError:
+            logger.warning(f"Attempted to access file outside code directory: {filename}")
+            return None
+
+        if not file_path.exists() or not file_path.is_file():
+            return None
+
+        try:
+            return file_path.read_text(encoding='utf-8')
+        except UnicodeDecodeError:
+            # For binary files, return a placeholder
+            return f"<Binary file: {filename}>"
+        except Exception as e:
+            logger.warning(f"Error reading file {filename}: {e}")
+            return None
+
+    def get_job_code_structure(self, job_uid: Union[str, UUID]) -> dict:
+        """
+        Get a comprehensive view of a job's code structure including file contents.
+
+        Args:
+            job_uid: The job's UUID
+
+        Returns:
+            Dictionary containing file structure and contents
+        """
+        job = self.get_job(job_uid)
+        if not job:
+            return {}
+
+        code_dir = self._get_job_dir(job) / "code"
+        if not code_dir.exists():
+            return {"error": "Code directory not found"}
+
+        structure = {
+            "files": {},
+            "directories": [],
+            "total_files": 0,
+            "has_run_script": False,
+            "run_script_content": None,
+        }
+
+        # Walk through all files and directories
+        for item in code_dir.rglob("*"):
+            relative_path = str(item.relative_to(code_dir))
+            
+            if item.is_file():
+                structure["total_files"] += 1
+                
+                # Read file content
+                try:
+                    content = item.read_text(encoding='utf-8')
+                    structure["files"][relative_path] = {
+                        "content": content,
+                        "size": len(content),
+                        "lines": len(content.splitlines()),
+                        "type": "text"
+                    }
+                except UnicodeDecodeError:
+                    structure["files"][relative_path] = {
+                        "content": f"<Binary file: {item.stat().st_size} bytes>",
+                        "size": item.stat().st_size,
+                        "lines": 0,
+                        "type": "binary"
+                    }
+                except Exception as e:
+                    structure["files"][relative_path] = {
+                        "content": f"<Error reading file: {e}>",
+                        "size": 0,
+                        "lines": 0,
+                        "type": "error"
+                    }
+                
+                # Check for run script
+                if relative_path in ("run.sh", "run.py", "run.bash"):
+                    structure["has_run_script"] = True
+                    if structure["files"][relative_path]["type"] == "text":
+                        structure["run_script_content"] = structure["files"][relative_path]["content"]
+            
+            elif item.is_dir():
+                structure["directories"].append(relative_path)
+
+        return structure
+
 
 def create_client(target_email: str = None, **config_kwargs) -> CodeQueueClient:
     """

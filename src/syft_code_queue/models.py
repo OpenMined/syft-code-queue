@@ -141,8 +141,12 @@ class CodeJob(BaseModel):
         if job is None:
             return None
 
-        # Get code files if available
-        code_files = self._client.get_job_code_files(str(self.uid)) or []
+        # Get code files if available using the correct client method
+        try:
+            code_files = self._client.list_job_files(str(self.uid)) or []
+        except Exception:
+            # If listing files fails, continue without them
+            code_files = []
 
         return {
             "uid": str(self.uid),
@@ -153,7 +157,7 @@ class CodeJob(BaseModel):
             "status": self.status.value,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "tags": self.tags,
-            "code_files": [str(f.name) for f in code_files],
+            "code_files": code_files,
             "code_folder": str(self.code_folder),
         }
 
@@ -179,6 +183,32 @@ class CodeJob(BaseModel):
         if self._client is None:
             raise RuntimeError("Job not connected to DataScientist API - cannot wait")
         return self._client.wait_for_completion(self.uid, timeout)
+
+    def list_files(self) -> list[str]:
+        """List all files in the job's code directory."""
+        if self._client is None:
+            raise RuntimeError("Job not connected to API - cannot list files")
+        return self._client.list_job_files(str(self.uid))
+
+    def read_file(self, filename: str) -> Optional[str]:
+        """Read the contents of a specific file in the job's code directory."""
+        if self._client is None:
+            raise RuntimeError("Job not connected to API - cannot read file")
+        return self._client.read_job_file(str(self.uid), filename)
+
+    def get_code_structure(self) -> dict:
+        """Get comprehensive code structure with metadata."""
+        if self._client is None:
+            raise RuntimeError("Job not connected to API - cannot get code structure")
+        return self._client.get_job_code_structure(str(self.uid))
+
+    def review(self):
+        """Show interactive filesystem UI for code review."""
+        if self._client is None:
+            raise RuntimeError("Job not connected to DataOwner API - cannot review")
+        
+        # Return the interactive filesystem widget
+        return FilesystemReviewWidget(self)
 
     def _repr_html_(self):
         """HTML representation for Jupyter notebooks."""
@@ -221,14 +251,24 @@ class CodeJob(BaseModel):
                 Created {time_display}
             </div>
             <div>
-                <button class="syft-btn syft-btn-secondary" onclick="reviewJob('{self.uid}')">
+                <button class="syft-btn syft-btn-secondary" onclick="(function(){{
+                    var code = 'import syft_code_queue as q\\n' +
+                               'from IPython.display import display\\n' +
+                               'job = q.get_job(\\'{self.uid}\\')\\n' +
+                               'if job:\\n' +
+                               '    display(job.review())  # Show interactive filesystem UI\\n' +
+                               'else:\\n' +
+                               '    print(\\'❌ Job {self.uid} not found\\')';
+                    navigator.clipboard.writeText(code).then(() => {{
+                        this.innerHTML = '👁️ Copied!';
+                        this.style.backgroundColor = '#6366f1';
+                        setTimeout(() => {{
+                            this.innerHTML = '👁️ Review Code';
+                            this.style.backgroundColor = '';
+                        }}, 2000);
+                    }}).catch(() => alert('Code copied. Paste in new cell:\\n\\n' + code));
+                }}).call(this)">
                     👁️ Review Code
-                </button>
-                <button class="syft-btn syft-btn-approve" onclick="approveJob('{self.uid}')">
-                    ✓ Approve
-                </button>
-                <button class="syft-btn syft-btn-reject" onclick="rejectJob('{self.uid}')">
-                    ✗ Reject
                 </button>
             </div>
         </div>
@@ -249,10 +289,63 @@ class CodeJob(BaseModel):
                 Created {time_display}
             </div>
             <div>
-                <button class="syft-btn syft-btn-secondary" onclick="viewLogs('{self.uid}')">
+                <button class="syft-btn syft-btn-secondary" onclick="(function(){{
+                    var code = 'import syft_code_queue as q\\n' +
+                               'job = q.get_job(\\'{self.uid}\\')\\n' +
+                               'if job:\\n' +
+                               '    logs = job.get_logs()\\n' +
+                               '    if logs:\\n' +
+                               '        print(\\'📜 Execution logs for \\' + job.name + \\':\\')\\n' +
+                               '        print(\\'=\\' * 50)\\n' +
+                               '        print(logs)\\n' +
+                               '        print(\\'=\\' * 50)\\n' +
+                               '    else:\\n' +
+                               '        print(\\'📜 No logs available for \\' + job.name)\\n' +
+                               'else:\\n' +
+                               '    print(\\'❌ Job {self.uid} not found\\')';
+                    navigator.clipboard.writeText(code).then(() => {{
+                        this.innerHTML = '📜 Copied!';
+                        this.style.backgroundColor = '#6366f1';
+                        setTimeout(() => {{
+                            this.innerHTML = '📜 View Logs';
+                            this.style.backgroundColor = '';
+                        }}, 2000);
+                    }}).catch(() => alert('Code copied. Paste in new cell:\\n\\n' + code));
+                }}).call(this)">
                     📜 View Logs
                 </button>
-                <button class="syft-btn syft-btn-secondary" onclick="viewOutput('{self.uid}')">
+                <button class="syft-btn syft-btn-secondary" onclick="(function(){{
+                    var code = 'import syft_code_queue as q\\n' +
+                               'job = q.get_job(\\'{self.uid}\\')\\n' +
+                               'if job:\\n' +
+                               '    output_path = job.get_output()\\n' +
+                               '    if output_path:\\n' +
+                               '        print(\\'📁 Output location for \\' + job.name + \\': \\' + str(output_path))\\n' +
+                               '        \\n' +
+                               '        # Try to show output directory contents\\n' +
+                               '        from pathlib import Path\\n' +
+                               '        if Path(output_path).exists():\\n' +
+                               '            print(\\'\\\\n📋 Output files:\\')\\n' +
+                               '            for file in Path(output_path).iterdir():\\n' +
+                               '                if file.is_file():\\n' +
+                               '                    print(f\\'  📄 {{file.name}} ({{file.stat().st_size}} bytes)\\')\\n' +
+                               '                elif file.is_dir():\\n' +
+                               '                    print(f\\'  📁 {{file.name}}/\\')\\n' +
+                               '        else:\\n' +
+                               '            print(\\'⚠️ Output directory does not exist yet\\')\\n' +
+                               '    else:\\n' +
+                               '        print(\\'📁 No output path available for \\' + job.name)\\n' +
+                               'else:\\n' +
+                               '    print(\\'❌ Job {self.uid} not found\\')';
+                    navigator.clipboard.writeText(code).then(() => {{
+                        this.innerHTML = '📁 Copied!';
+                        this.style.backgroundColor = '#8b5cf6';
+                        setTimeout(() => {{
+                            this.innerHTML = '📁 View Output';
+                            this.style.backgroundColor = '';
+                        }}, 2000);
+                    }}).catch(() => alert('Code copied. Paste in new cell:\\n\\n' + code));
+                }}).call(this)">
                     📁 View Output
                 </button>
             </div>
@@ -527,234 +620,7 @@ class CodeJob(BaseModel):
             </div>
         </div>
 
-    <script>
-    window.reviewJob = function(jobId) {{
-        var code = `# Review job details (use collection[index] for specific job)
-import syft_code_queue as q
-# Find the job by ID - you can also use q.pending_for_me[index] if you know the index
-job = None
-for collection_name in ['jobs_for_me', 'pending_for_me']:
-    if hasattr(q, collection_name):
-        collection = getattr(q, collection_name)
-        for j in collection:
-            if str(j.uid).startswith('${{jobId}}'):
-                job = j
-                break
-        if job:
-            break
 
-if job:
-    print(f"📋 Reviewing Job: {{job.name}}")
-    print(f"🆔 ID: {{job.short_id}}")
-    print(f"👤 From: {{job.requester_email}}")
-    print(f"📝 Description: {{job.description or 'No description'}}")
-    print(f"🏷️  Tags: {{', '.join(job.tags) if job.tags else 'None'}}")
-
-    details = job.review()
-    if details and details.get('code_files'):
-        print(f"\\n📁 Code files: {{', '.join(details['code_files'])}}")
-
-    # Show code content preview
-    from pathlib import Path
-    if hasattr(job, 'code_folder') and job.code_folder:
-        run_script = Path(job.code_folder) / 'run.sh'
-        if run_script.exists():
-            print("\\n🔧 run.sh contents:")
-            print("-" * 40)
-            try:
-                content = run_script.read_text()
-                print(content)
-            except Exception as e:
-                print(f"Error reading file: {{e}}")
-            print("-" * 40)
-else:
-    print(f"❌ Job ${{jobId}} not found")`;
-
-        navigator.clipboard.writeText(code).then(() => {{
-            // Update button to show success
-            var buttons = document.querySelectorAll(`button[onclick="reviewJob('${{jobId}}')"]`);
-            buttons.forEach(button => {{
-                var originalText = button.innerHTML;
-                button.innerHTML = '📋 Copied!';
-                button.style.backgroundColor = '#059669';
-                setTimeout(() => {{
-                    button.innerHTML = originalText;
-                    button.style.backgroundColor = '';
-                }}, 2000);
-            }});
-        }}).catch(err => {{
-            console.error('Could not copy code to clipboard:', err);
-            alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
-        }});
-    }};
-
-    window.approveJob = function(jobId) {{
-        var reason = prompt("Approval reason (optional):", "Approved via Jupyter interface");
-        if (reason !== null) {{  // User didn't cancel
-            var code = `# Approve job
-import syft_code_queue as q
-job = None
-for j in q.jobs_for_me:
-    if str(j.uid).startswith('${{jobId}}') or str(j.uid) == '${{jobId}}':
-        job = j
-        break
-
-if job:
-    success = job.approve("${{reason.replace(/"/g, '\\"')}}")
-    if success:
-        print(f"✅ Approved job: {{job.name}}")
-        print("🔄 Refresh this view to see updated status")
-    else:
-        print(f"❌ Failed to approve job: {{job.name}}")
-else:
-    print(f"❌ Job ${{jobId}} not found")`;
-
-            navigator.clipboard.writeText(code).then(() => {{
-                // Update button to show success
-                var buttons = document.querySelectorAll(`button[onclick="approveJob('${{jobId}}')"]`);
-                buttons.forEach(button => {{
-                    var originalText = button.innerHTML;
-                    button.innerHTML = '✅ Copied!';
-                    button.style.backgroundColor = '#059669';
-                    setTimeout(() => {{
-                        button.innerHTML = originalText;
-                        button.style.backgroundColor = '';
-                    }}, 2000);
-                }});
-            }}).catch(err => {{
-                console.error('Could not copy code to clipboard:', err);
-                alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
-            }});
-        }}
-    }};
-
-    window.rejectJob = function(jobId) {{
-        var reason = prompt("Rejection reason:", "");
-        if (reason !== null && reason.trim() !== "") {{
-            var code = `# Reject job
-import syft_code_queue as q
-job = None
-for j in q.jobs_for_me:
-    if str(j.uid).startswith('${{jobId}}') or str(j.uid) == '${{jobId}}':
-        job = j
-        break
-
-if job:
-    success = job.reject("${{reason.replace(/"/g, '\\"')}}")
-    if success:
-        print(f"🚫 Rejected job: {{job.name}}")
-        print("🔄 Refresh this view to see updated status")
-    else:
-        print(f"❌ Failed to reject job: {{job.name}}")
-else:
-    print(f"❌ Job ${{jobId}} not found")`;
-
-            navigator.clipboard.writeText(code).then(() => {{
-                // Update button to show success
-                var buttons = document.querySelectorAll(`button[onclick="rejectJob('${{jobId}}')"]`);
-                buttons.forEach(button => {{
-                    var originalText = button.innerHTML;
-                    button.innerHTML = '🚫 Copied!';
-                    button.style.backgroundColor = '#dc2626';
-                    setTimeout(() => {{
-                        button.innerHTML = originalText;
-                        button.style.backgroundColor = '';
-                    }}, 2000);
-                }});
-            }}).catch(err => {{
-                console.error('Could not copy code to clipboard:', err);
-                alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
-            }});
-        }}
-    }};
-
-    window.viewLogs = function(jobId) {{
-        var code = `# View job execution logs
-import syft_code_queue as q
-job = None
-for j in q.jobs_for_others:
-    if str(j.uid).startswith('${{jobId}}') or str(j.uid) == '${{jobId}}':
-        job = j
-        break
-
-if job:
-    logs = job.get_logs()
-    if logs:
-        print(f"📜 Execution logs for {{job.name}}:")
-        print("=" * 50)
-        print(logs)
-        print("=" * 50)
-    else:
-        print(f"📜 No logs available for {{job.name}}")
-else:
-    print(f"❌ Job ${{jobId}} not found")`;
-
-        navigator.clipboard.writeText(code).then(() => {{
-            // Update button to show success
-            var buttons = document.querySelectorAll(`button[onclick="viewLogs('${{jobId}}')"]`);
-            buttons.forEach(button => {{
-                var originalText = button.innerHTML;
-                button.innerHTML = '📜 Copied!';
-                button.style.backgroundColor = '#6366f1';
-                setTimeout(() => {{
-                    button.innerHTML = originalText;
-                    button.style.backgroundColor = '';
-                }}, 2000);
-            }});
-        }}).catch(err => {{
-            console.error('Could not copy code to clipboard:', err);
-            alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
-        }});
-    }};
-
-    window.viewOutput = function(jobId) {{
-        var code = `# View job output files
-import syft_code_queue as q
-job = None
-for j in q.jobs_for_others:
-    if str(j.uid).startswith('${{jobId}}') or str(j.uid) == '${{jobId}}':
-        job = j
-        break
-
-if job:
-    output_path = job.get_output()
-    if output_path:
-        print(f"📁 Output location for {{job.name}}: {{output_path}}")
-
-        # Try to show output directory contents
-        from pathlib import Path
-        if Path(output_path).exists():
-            print("\\n📋 Output files:")
-            for file in Path(output_path).iterdir():
-                if file.is_file():
-                    print(f"  📄 {{file.name}} ({{file.stat().st_size}} bytes)")
-                elif file.is_dir():
-                    print(f"  📁 {{file.name}}/")
-        else:
-            print("⚠️ Output directory does not exist yet")
-    else:
-        print(f"📁 No output path available for {{job.name}}")
-else:
-    print(f"❌ Job ${{jobId}} not found")`;
-
-        navigator.clipboard.writeText(code).then(() => {{
-            // Update button to show success
-            var buttons = document.querySelectorAll(`button[onclick="viewOutput('${{jobId}}')"]`);
-            buttons.forEach(button => {{
-                var originalText = button.innerHTML;
-                button.innerHTML = '📁 Copied!';
-                button.style.backgroundColor = '#8b5cf6';
-                setTimeout(() => {{
-                    button.innerHTML = originalText;
-                    button.style.backgroundColor = '';
-                }}, 2000);
-            }});
-        }}).catch(err => {{
-            console.error('Could not copy code to clipboard:', err);
-            alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
-        }});
-    }};
-    </script>
 
     </div>
     """
@@ -1012,11 +878,12 @@ class JobCollection(list[CodeJob]):
             width: 100%;
             border-collapse: collapse;
             font-size: 13px;
+            table-layout: fixed;
         }}
         .syft-jobs-table th {{
             background-color: #f8fafc;
             border-bottom: 2px solid #e5e7eb;
-            padding: 12px 16px;
+            padding: 8px 12px;
             text-align: left;
             font-weight: 600;
             color: #374151;
@@ -1026,8 +893,9 @@ class JobCollection(list[CodeJob]):
         }}
         .syft-jobs-table td {{
             border-bottom: 1px solid #f1f3f4;
-            padding: 12px 16px;
+            padding: 8px 12px;
             vertical-align: top;
+            overflow: hidden;
         }}
         .syft-jobs-table tr:hover {{
             background-color: #f8fafc;
@@ -1035,26 +903,42 @@ class JobCollection(list[CodeJob]):
         .syft-jobs-table tr.syft-selected {{
             background-color: #eff6ff;
         }}
+        
+        /* Column width allocation */
+        .syft-jobs-table th:nth-child(1), .syft-jobs-table td:nth-child(1) {{ width: 40px; }} /* Checkbox */
+        .syft-jobs-table th:nth-child(2), .syft-jobs-table td:nth-child(2) {{ width: 30%; }} /* Job Name */
+        .syft-jobs-table th:nth-child(3), .syft-jobs-table td:nth-child(3) {{ width: 80px; }} /* Status */
+        .syft-jobs-table th:nth-child(4), .syft-jobs-table td:nth-child(4) {{ width: 15%; }} /* From */
+        .syft-jobs-table th:nth-child(5), .syft-jobs-table td:nth-child(5) {{ width: 15%; }} /* To */
+        .syft-jobs-table th:nth-child(6), .syft-jobs-table td:nth-child(6) {{ width: 15%; }} /* Tags */
+        .syft-jobs-table th:nth-child(7), .syft-jobs-table td:nth-child(7) {{ width: 70px; }} /* ID */
+        .syft-jobs-table th:nth-child(8), .syft-jobs-table td:nth-child(8) {{ width: 100px; }} /* Actions */
+        
         .syft-job-name {{
             font-weight: 600;
             color: #111827;
-            max-width: 200px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            display: block;
         }}
         .syft-job-desc {{
             color: #6b7280;
             font-size: 12px;
-            max-width: 150px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            display: block;
+            margin-top: 2px;
         }}
         .syft-job-email {{
             color: #3b82f6;
             font-size: 12px;
             font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: block;
         }}
         .syft-job-id {{
             font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
@@ -1064,8 +948,8 @@ class JobCollection(list[CodeJob]):
         .syft-job-tags {{
             display: flex;
             flex-wrap: wrap;
-            gap: 4px;
-            max-width: 120px;
+            gap: 2px;
+            overflow: hidden;
         }}
         .syft-job-tag {{
             background-color: #f3f4f6;
@@ -1074,6 +958,21 @@ class JobCollection(list[CodeJob]):
             border-radius: 4px;
             font-size: 10px;
             font-weight: 500;
+            white-space: nowrap;
+        }}
+        
+        /* Responsive design for narrow screens */
+        @media (max-width: 1200px) {{
+            .syft-jobs-table th:nth-child(6), .syft-jobs-table td:nth-child(6) {{ display: none; }} /* Hide Tags */
+        }}
+        @media (max-width: 1000px) {{
+            .syft-jobs-table th:nth-child(7), .syft-jobs-table td:nth-child(7) {{ display: none; }} /* Hide ID */
+            .syft-job-desc {{ display: none; }} /* Hide description */
+        }}
+        @media (max-width: 800px) {{
+            .syft-jobs-table th:nth-child(5), .syft-jobs-table td:nth-child(5) {{ display: none; }} /* Hide To */
+            .syft-jobs-table th:nth-child(4), .syft-jobs-table td:nth-child(4) {{ width: 25%; }} /* Expand From */
+            .syft-jobs-table th:nth-child(2), .syft-jobs-table td:nth-child(2) {{ width: 40%; }} /* Expand Job Name */
         }}
         .syft-badge {{
             display: inline-flex;
@@ -1179,8 +1078,20 @@ class JobCollection(list[CodeJob]):
                 <button class="syft-filter-btn" onclick="filterByStatus('{container_id}', 'completed')">Completed ({summary["by_status"].get("completed", 0)})</button>
         """
 
-        # Add batch approval buttons if any jobs can be approved
-        if any(job.status == JobStatus.pending and job._client is not None for job in self):
+        # Add batch approval buttons only if any jobs can be approved by the current user
+        # (i.e., jobs submitted TO me that are pending, not jobs I submitted to others)
+        current_user_email = None
+        if self and hasattr(self[0], '_client') and self[0]._client:
+            current_user_email = self[0]._client.syftbox_client.email
+        
+        can_approve_any = any(
+            job.status == JobStatus.pending and 
+            job._client is not None and
+            job.target_email == current_user_email
+            for job in self
+        )
+        
+        if can_approve_any:
             html_content += f"""
                 <button class="syft-batch-btn" onclick="batchApprove('{container_id}')">Approve Selected</button>
                 <button class="syft-batch-btn reject" onclick="batchReject('{container_id}')">Reject Selected</button>
@@ -1222,31 +1133,46 @@ class JobCollection(list[CodeJob]):
                 # Handle cases where created_at is None or invalid
                 pass
 
-            # Build tags
+            # Build tags with tooltip showing all tags
             tags_html = ""
+            tags_title = ""
             if job.tags:
+                tags_title = html.escape(", ".join(job.tags))
                 for tag in job.tags[:2]:  # Show max 2 tags
                     tags_html += f'<span class="syft-job-tag">{html.escape(tag)}</span>'
                 if len(job.tags) > 2:
                     tags_html += f'<span class="syft-job-tag">+{len(job.tags) - 2}</span>'
 
             # Build action buttons - pass index and collection type
-            collection_name = (
-                "pending_for_me"
-                if (job.status == JobStatus.pending and job._client is not None)
-                else "jobs_for_others"
+            # Determine if this job can be approved by current user
+            can_approve_job = (
+                job.status == JobStatus.pending and 
+                job._client is not None and
+                job.target_email == current_user_email
             )
+            
+            collection_name = (
+                "pending_for_me" if can_approve_job else "jobs_for_others"
+            )
+            
             actions_html = ""
-            if job.status == JobStatus.pending and job._client is not None:
+            if can_approve_job:
+                # Jobs I can approve (submitted TO me)
                 actions_html = f"""
                     <button class="syft-action-btn approve" onclick="approveJob({i}, '{collection_name}')">✓</button>
                     <button class="syft-action-btn reject" onclick="rejectJob({i}, '{collection_name}')">✗</button>
+                    <button class="syft-action-btn" onclick="reviewJob({i}, '{collection_name}')">👁️</button>
+                """
+            elif job.status == JobStatus.pending and job._client is not None:
+                # Jobs I submitted to others (pending their approval) - only review
+                actions_html = f"""
                     <button class="syft-action-btn" onclick="reviewJob({i}, '{collection_name}')">👁️</button>
                 """
             elif (
                 job.status in (JobStatus.running, JobStatus.completed, JobStatus.failed)
                 and job._client is not None
             ):
+                # Completed/running jobs - logs and output
                 actions_html = f"""
                     <button class="syft-action-btn" onclick="viewLogs({i}, '{collection_name}')">📜</button>
                     <button class="syft-action-btn" onclick="viewOutput({i}, '{collection_name}')">📁</button>
@@ -1267,13 +1193,13 @@ class JobCollection(list[CodeJob]):
                                 <span class="syft-badge syft-badge-{job.status.value}">{job.status.value}</span>
                             </td>
                             <td>
-                                <div class="syft-job-email">{html.escape(job.requester_email)}</div>
+                                <div class="syft-job-email" title="{html.escape(job.requester_email)}">{html.escape(job.requester_email)}</div>
                             </td>
                             <td>
-                                <div class="syft-job-email">{html.escape(job.target_email)}</div>
+                                <div class="syft-job-email" title="{html.escape(job.target_email)}">{html.escape(job.target_email)}</div>
                             </td>
                             <td>
-                                <div class="syft-job-tags">{tags_html}</div>
+                                <div class="syft-job-tags" title="{tags_title}">{tags_html}</div>
                             </td>
                             <td>
                                 <div class="syft-job-id">{job.short_id}</div>
@@ -1356,9 +1282,33 @@ class JobCollection(list[CodeJob]):
         }}
 
                  function batchApprove(containerId) {{
-             const reason = prompt("Approval reason for selected jobs:", "Batch approved via Jupyter interface");
+             // Get selected job indices
+             const table = document.querySelector(`#${{containerId}} .syft-jobs-table tbody`);
+             const rows = table.querySelectorAll('tr');
+             const selectedIndices = [];
+             
+             rows.forEach((row, index) => {{
+                 const checkbox = row.querySelector('input[type="checkbox"]');
+                 if (checkbox && checkbox.checked && row.style.display !== 'none') {{
+                     selectedIndices.push(index);
+                 }}
+             }});
+             
+             if (selectedIndices.length === 0) {{
+                 alert('Please select jobs to approve first.');
+                 return;
+             }}
+             
+             const reason = prompt(`Approval reason for ${{selectedIndices.length}} selected job(s):`, "Batch approved via Jupyter interface");
              if (reason !== null) {{
-                 var code = `q.pending_for_me.approve_all("${{reason.replace(/"/g, '\\"')}}")`;
+                 let code = 'import syft_code_queue as q\\n';
+                 code += 'approved_count = 0\\n';
+                 selectedIndices.forEach(index => {{
+                     code += `if len(q.pending_for_me) > ${{index}}:\\n`;
+                     code += `    if q.pending_for_me[${{index}}].approve("${{reason.replace(/"/g, '\\"')}}"):  \\n`;
+                     code += `        approved_count += 1\\n`;
+                 }});
+                 code += 'print(f"✅ Approved {{approved_count}} job(s)")';
 
                  navigator.clipboard.writeText(code).then(() => {{
                      const button = document.querySelector(`#${{containerId}} button[onclick="batchApprove('${{containerId}}')"]`);
@@ -1379,9 +1329,33 @@ class JobCollection(list[CodeJob]):
          }}
 
                  function batchReject(containerId) {{
-             const reason = prompt("Rejection reason for selected jobs:", "Batch rejected via Jupyter interface");
+             // Get selected job indices
+             const table = document.querySelector(`#${{containerId}} .syft-jobs-table tbody`);
+             const rows = table.querySelectorAll('tr');
+             const selectedIndices = [];
+             
+             rows.forEach((row, index) => {{
+                 const checkbox = row.querySelector('input[type="checkbox"]');
+                 if (checkbox && checkbox.checked && row.style.display !== 'none') {{
+                     selectedIndices.push(index);
+                 }}
+             }});
+             
+             if (selectedIndices.length === 0) {{
+                 alert('Please select jobs to reject first.');
+                 return;
+             }}
+             
+             const reason = prompt(`Rejection reason for ${{selectedIndices.length}} selected job(s):`, "Batch rejected via Jupyter interface");
              if (reason !== null && reason.trim() !== "") {{
-                 var code = `q.pending_for_me.reject_all("${{reason.replace(/"/g, '\\"')}}")`;
+                 let code = 'import syft_code_queue as q\\n';
+                 code += 'rejected_count = 0\\n';
+                 selectedIndices.forEach(index => {{
+                     code += `if len(q.pending_for_me) > ${{index}}:\\n`;
+                     code += `    if q.pending_for_me[${{index}}].reject("${{reason.replace(/"/g, '\\"')}}"):  \\n`;
+                     code += `        rejected_count += 1\\n`;
+                 }});
+                 code += 'print(f"🚫 Rejected {{rejected_count}} job(s)")';
 
                  navigator.clipboard.writeText(code).then(() => {{
                      const button = document.querySelector(`#${{containerId}} button[onclick="batchReject('${{containerId}}')"]`);
@@ -1403,7 +1377,9 @@ class JobCollection(list[CodeJob]):
 
                  // Simple index-based job actions
          window.reviewJob = function(index, collection) {{
-             var code = `q.${{collection}}[${{index}}].review()`;
+             var code = 'from IPython.display import display\\n' +
+                        'import syft_code_queue as q\\n' +
+                        'display(q.' + collection + '[' + index + '].review())';
 
              navigator.clipboard.writeText(code).then(() => {{
                  var buttons = document.querySelectorAll(`button[onclick="reviewJob(${{index}}, '${{collection}}')"]`);
@@ -1547,3 +1523,470 @@ class QueueConfig(BaseModel):
     max_concurrent_jobs: int = 3
     job_timeout: int = 300  # 5 minutes default
     cleanup_completed_after: int = 86400  # 24 hours
+
+
+class FilesystemReviewWidget:
+    """Interactive filesystem widget for code review in Jupyter."""
+    
+    def __init__(self, job: "CodeJob"):
+        self.job = job
+        self._html_content = None
+    
+    def _repr_html_(self):
+        """Return HTML for Jupyter display."""
+        if self._html_content is None:
+            self._html_content = self._create_filesystem_ui()
+        return self._html_content
+    
+    def _create_filesystem_ui(self):
+        """Create the interactive filesystem UI."""
+        import html
+        
+        # Get file list
+        try:
+            files = self.job.list_files()
+        except Exception as e:
+            return f"""
+            <div style="padding: 20px; color: #dc3545; border: 1px solid #dc3545; border-radius: 8px; background: #f8d7da;">
+                <h3>❌ Unable to load files</h3>
+                <p>Error: {html.escape(str(e))}</p>
+            </div>
+            """
+        
+        if not files:
+            return f"""
+            <div style="padding: 20px; color: #6c757d; border: 1px solid #dee2e6; border-radius: 8px; background: #f8f9fa;">
+                <h3>📁 No files found</h3>
+                <p>This job appears to have no files to review.</p>
+            </div>
+            """
+        
+        # Sort files - executables first, then alphabetically
+        def sort_key(filename):
+            is_executable = filename in ['run.sh', 'run.py', 'run.bash']
+            return (not is_executable, filename.lower())
+        
+        sorted_files = sorted(files, key=sort_key)
+        
+        # Build file list HTML
+        files_html = ""
+        for i, filename in enumerate(sorted_files):
+            icon = self._get_file_type(filename)
+            is_executable = filename in ['run.sh', 'run.py', 'run.bash']
+            file_class = "file-executable" if is_executable else "file-regular"
+            
+            files_html += f"""
+                <div class="file-item {file_class}" onclick="loadFileReview('{filename}')" data-filename="{filename}">
+                    <span class="file-icon">{icon}</span>
+                    <span class="file-name">{html.escape(filename)}</span>
+                </div>
+            """
+        
+        # Pre-load all file contents for the JavaScript
+        file_contents = {}
+        for filename in sorted_files:
+            try:
+                content = self.job.read_file(filename)
+                if content:
+                    file_contents[filename] = content
+                else:
+                    file_contents[filename] = "❌ Could not read file content"
+            except Exception as e:
+                file_contents[filename] = f"❌ Error reading file: {str(e)}"
+        
+        # Get first file content for initial display
+        first_file = sorted_files[0] if sorted_files else None
+        initial_content = ""
+        if first_file and first_file in file_contents:
+            initial_content = html.escape(file_contents[first_file])
+        
+        # Convert file contents to JavaScript object
+        import json
+        file_contents_js = json.dumps(file_contents)
+        
+        return f"""
+        <div class="filesystem-review-container">
+            <style>
+            .filesystem-review-container {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                border: 1px solid #e1e5e9;
+                border-radius: 12px;
+                overflow: hidden;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 16px 0;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            }}
+            
+            .review-header {{
+                padding: 20px 24px;
+                color: white;
+                background: rgba(255,255,255,0.2);
+                backdrop-filter: blur(10px);
+                border-bottom: 1px solid rgba(255,255,255,0.2);
+            }}
+            
+            .review-title {{
+                font-size: 20px;
+                font-weight: 700;
+                margin: 0 0 8px 0;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }}
+            
+            .review-meta {{
+                font-size: 14px;
+                opacity: 0.9;
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                margin: 8px 0 0 0;
+            }}
+            
+            .review-content {{
+                display: flex;
+                height: 500px;
+                background: white;
+            }}
+            
+            .file-list {{
+                width: 280px;
+                border-right: 1px solid #e1e5e9;
+                background: #f8fafc;
+                overflow-y: auto;
+            }}
+            
+            .file-list-header {{
+                padding: 16px;
+                background: #f1f5f9;
+                border-bottom: 1px solid #e1e5e9;
+                font-weight: 600;
+                color: #475569;
+                font-size: 14px;
+            }}
+            
+            .file-item {{
+                padding: 12px 16px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                border-bottom: 1px solid #f1f5f9;
+                transition: all 0.2s ease;
+            }}
+            
+            .file-item:hover {{
+                background: #e2e8f0;
+            }}
+            
+            .file-item.active {{
+                background: #3b82f6;
+                color: white;
+            }}
+            
+            .file-item.file-executable {{
+                background: linear-gradient(90deg, #fef3c7, #fef3c7);
+                border-left: 4px solid #f59e0b;
+            }}
+            
+            .file-item.file-executable:hover {{
+                background: linear-gradient(90deg, #fde68a, #fde68a);
+            }}
+            
+            .file-item.file-executable.active {{
+                background: #f59e0b;
+                color: white;
+            }}
+            
+            .file-icon {{
+                font-size: 16px;
+                min-width: 20px;
+            }}
+            
+            .file-name {{
+                font-size: 14px;
+                font-weight: 500;
+            }}
+            
+            .content-viewer {{
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+            }}
+            
+            .content-header {{
+                padding: 16px 20px;
+                background: #f8fafc;
+                border-bottom: 1px solid #e1e5e9;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }}
+            
+            .content-title {{
+                font-weight: 600;
+                color: #1e293b;
+                font-size: 14px;
+            }}
+            
+            .content-meta {{
+                font-size: 12px;
+                color: #64748b;
+            }}
+            
+            .content-body {{
+                flex: 1;
+                overflow: auto;
+                padding: 0;
+            }}
+            
+            .content-code {{
+                padding: 20px;
+                font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+                font-size: 13px;
+                line-height: 1.6;
+                white-space: pre-wrap;
+                margin: 0;
+                background: #ffffff;
+                color: #1e293b;
+                border: none;
+                min-height: 100%;
+            }}
+            
+            .action-buttons {{
+                padding: 16px 20px;
+                background: #f8fafc;
+                border-top: 1px solid #e1e5e9;
+                display: flex;
+                gap: 12px;
+                justify-content: center;
+            }}
+            
+            .action-btn {{
+                padding: 10px 20px;
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                font-size: 14px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
+            
+            .action-btn.approve {{
+                background: linear-gradient(135deg, #10b981, #059669);
+                color: white;
+            }}
+            
+            .action-btn.approve:hover {{
+                background: linear-gradient(135deg, #059669, #047857);
+                transform: translateY(-1px);
+            }}
+            
+            .action-btn.reject {{
+                background: linear-gradient(135deg, #ef4444, #dc2626);
+                color: white;
+            }}
+            
+            .action-btn.reject:hover {{
+                background: linear-gradient(135deg, #dc2626, #b91c1c);
+                transform: translateY(-1px);
+            }}
+            
+            .loading {{
+                padding: 40px;
+                text-align: center;
+                color: #64748b;
+            }}
+            </style>
+            
+            <div class="review-header">
+                <div class="review-title">
+                    🔍 Code Review: {html.escape(self.job.name)}
+                    <span style="background: rgba(255,255,255,0.2); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 500;">{len(files)} files</span>
+                </div>
+                <div class="review-meta">
+                    📧 {html.escape(self.job.requester_email)} → {html.escape(self.job.target_email)}
+                    • 🏷️ {', '.join(self.job.tags) if self.job.tags else 'No tags'}
+                </div>
+            </div>
+            
+            <div class="review-content">
+                <div class="file-list">
+                    <div class="file-list-header">📁 Files ({len(files)})</div>
+                    {files_html}
+                </div>
+                
+                <div class="content-viewer">
+                    <div class="content-header">
+                        <div class="content-title" id="current-file">{html.escape(first_file) if first_file else 'No file selected'}</div>
+                        <div class="content-meta" id="file-meta"></div>
+                    </div>
+                    <div class="content-body">
+                        <pre class="content-code" id="file-content">{initial_content}</pre>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="action-buttons">
+                {self._get_action_buttons_html()}
+            </div>
+        </div>
+        
+        <script>
+        let currentJobUid = '{self.job.uid}';
+        let jobFiles = {sorted_files};
+        let fileContents = {file_contents_js};
+        
+        function loadFileReview(filename) {{
+            // Update active file styling
+            document.querySelectorAll('.file-item').forEach(item => {{
+                item.classList.remove('active');
+            }});
+            document.querySelector(`[data-filename="${{filename}}"]`).classList.add('active');
+            
+            // Update header
+            document.getElementById('current-file').textContent = filename;
+            
+            // Get file content from pre-loaded data
+            let content = fileContents[filename];
+            if (content) {{
+                // Display the actual file content
+                document.getElementById('file-content').textContent = content;
+                
+                // Update metadata
+                let lines = content.split('\\n').length;
+                let chars = content.length;
+                document.getElementById('file-meta').textContent = `${{lines}} lines • ${{chars}} characters`;
+            }} else {{
+                document.getElementById('file-content').textContent = 'File content not available.';
+                document.getElementById('file-meta').textContent = 'Content not loaded';
+            }}
+        }}
+        
+        function approveJobReview(jobUid) {{
+            let reason = prompt('Approval reason (optional):', 'Code review completed - approved');
+            if (reason !== null) {{
+                let code = `
+# Approve job after review
+job = q.get_job('${{jobUid}}')
+if job:
+    success = job.approve('` + reason.replace(/'/g, "\\'") + `')
+    if success:
+        print('✅ Job approved successfully!')
+        print('Job: ' + job.name)
+        print('Reason: ` + reason + `')
+    else:
+        print('❌ Failed to approve job')
+else:
+    print('❌ Job not found')`;
+                
+                navigator.clipboard.writeText(code.trim()).then(() => {{
+                    alert('✅ Approval code copied to clipboard!\\n\\nPaste and run in a new cell to approve the job.');
+                }}).catch(() => {{
+                    alert('Approval code:\\n\\n' + code.trim());
+                }});
+            }}
+        }}
+        
+        function rejectJobReview(jobUid) {{
+            let reason = prompt('Rejection reason:', '');
+            if (reason !== null && reason.trim() !== '') {{
+                let code = `
+# Reject job after review
+job = q.get_job('${{jobUid}}')
+if job:
+    success = job.reject('` + reason.replace(/'/g, "\\'") + `')
+    if success:
+        print('🚫 Job rejected')
+        print('Job: ' + job.name)
+        print('Reason: ` + reason + `')
+    else:
+        print('❌ Failed to reject job')
+else:
+    print('❌ Job not found')`;
+                
+                navigator.clipboard.writeText(code.trim()).then(() => {{
+                    alert('🚫 Rejection code copied to clipboard!\\n\\nPaste and run in a new cell to reject the job.');
+                }}).catch(() => {{
+                    alert('Rejection code:\\n\\n' + code.trim());
+                }});
+            }}
+        }}
+        
+        // Initialize first file as active
+        if (jobFiles.length > 0) {{
+            let firstFile = jobFiles[0];
+            document.querySelector(`[data-filename="${{firstFile}}"]`).classList.add('active');
+            
+            // Show metadata for the first file
+            let firstContent = fileContents[firstFile];
+            if (firstContent) {{
+                let lines = firstContent.split('\\n').length;
+                let chars = firstContent.length;
+                document.getElementById('file-meta').textContent = `${{lines}} lines • ${{chars}} characters`;
+            }}
+        }}
+        </script>
+        """
+    
+    def _get_action_buttons_html(self) -> str:
+        """Get HTML for action buttons based on user permissions."""
+        # Check if current user can approve this job
+        current_user_email = None
+        if self.job._client:
+            current_user_email = self.job._client.syftbox_client.email
+        
+        can_approve = (
+            self.job.status == JobStatus.pending and
+            self.job._client is not None and
+            self.job.target_email == current_user_email
+        )
+        
+        if can_approve:
+            # User can approve - show approve/reject buttons
+            return f"""
+                <button class="action-btn approve" onclick="approveJobReview('{self.job.uid}')">
+                    ✅ Approve Job
+                </button>
+                <button class="action-btn reject" onclick="rejectJobReview('{self.job.uid}')">
+                    🚫 Reject Job
+                </button>
+            """
+        else:
+            # User cannot approve - show info message
+            if self.job.status != JobStatus.pending:
+                status_msg = f"Job status: {self.job.status.value}"
+            else:
+                status_msg = "Awaiting approval from job recipient"
+            
+            return f"""
+                <div style="text-align: center; padding: 16px; color: #64748b; font-style: italic;">
+                    📋 Review only • {status_msg}
+                </div>
+            """
+
+    def _get_file_type(self, filename: str) -> str:
+        """Get emoji icon for file type."""
+        if filename.endswith('.py'):
+            return '🐍'
+        elif filename.endswith(('.sh', '.bash')):
+            return '💻'
+        elif filename.endswith(('.txt', '.md')):
+            return '📝'
+        elif filename.endswith(('.yml', '.yaml')):
+            return '⚙️'
+        elif filename.endswith('.json'):
+            return '📋'
+        elif filename.endswith(('.csv', '.tsv')):
+            return '📊'
+        elif filename in ['requirements.txt', 'pyproject.toml', 'setup.py']:
+            return '📦'
+        elif filename in ['Dockerfile', 'docker-compose.yml']:
+            return '🐳'
+        elif filename.startswith('run.'):
+            return '🚀'
+        else:
+            return '📄'

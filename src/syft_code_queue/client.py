@@ -42,6 +42,10 @@ class CodeQueueClient:
         for status in JobStatus:
             status_dir = self._get_status_dir(status)
             status_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Create syftperm file for pending folder to allow cross-datasite writes
+            if status == JobStatus.pending:
+                self._create_pending_syftperm(status_dir)
 
     def _get_target_queue_dir(self, target_email: str) -> Path:
         """Get the queue directory for a target email's datasite."""
@@ -54,6 +58,42 @@ class CodeQueueClient:
     def _get_queue_dir(self) -> Path:
         """Get the local queue directory."""
         return self.syftbox_client.app_data(self.queue_name) / "jobs"
+    
+    def _create_pending_syftperm(self, pending_dir: Path):
+        """Create syftperm file for pending directory to allow cross-datasite writes."""
+        syftperm_file = pending_dir / ".syftperm"
+        
+        # Only create if it doesn't exist to avoid overwriting custom permissions
+        if not syftperm_file.exists():
+            syftperm_content = """rules:
+- pattern: '**'
+  access:
+    read:
+    - '*'
+    write:
+    - '*'
+"""
+            try:
+                with open(syftperm_file, 'w') as f:
+                    f.write(syftperm_content)
+                logger.debug(f"Created .syftperm file for pending directory: {pending_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to create .syftperm file in {pending_dir}: {e}")
+
+    def _ensure_target_pending_directory(self, target_email: str):
+        """Ensure the target's pending directory exists with proper syftperm for cross-datasite writes."""
+        target_queue_dir = self._get_target_queue_dir(target_email)
+        pending_dir = target_queue_dir / JobStatus.pending.value
+        
+        try:
+            # Create the pending directory if it doesn't exist
+            pending_dir.mkdir(parents=True, exist_ok=True)
+            # Ensure syftperm file exists for cross-datasite writes
+            self._create_pending_syftperm(pending_dir)
+            logger.debug(f"Ensured pending directory exists with permissions for {target_email}")
+        except Exception as e:
+            logger.warning(f"Failed to ensure pending directory for {target_email}: {e}")
+            raise RuntimeError(f"Cannot set up pending directory for {target_email}: {e}")
 
     def _get_job_dir(self, job: CodeJob) -> Path:
         """Get directory for a specific job."""
@@ -101,6 +141,9 @@ class CodeQueueClient:
                     try:
                         # Move the entire job directory
                         new_job_dir.parent.mkdir(parents=True, exist_ok=True)
+                        # Ensure syftperm exists for pending directories
+                        if job.status == JobStatus.pending:
+                            self._create_pending_syftperm(new_job_dir.parent)
                         if new_job_dir.exists():
                             shutil.rmtree(new_job_dir)
                         shutil.move(str(old_job_dir), str(new_job_dir))
@@ -116,6 +159,9 @@ class CodeQueueClient:
             job_dir = get_cross_datasite_job_dir(job.status)
             try:
                 job_dir.mkdir(parents=True, exist_ok=True)
+                # Ensure syftperm exists for pending directories in cross-datasite jobs
+                if job.status == JobStatus.pending:
+                    self._create_pending_syftperm(job_dir.parent)
                 job_file = job_dir / "metadata.json"
 
                 with open(job_file, "w") as f:
@@ -394,6 +440,57 @@ class CodeQueueClient:
             # The temp directory will be cleaned up by the system later
             pass
 
+    def create_bash_job(
+        self,
+        target_email: str,
+        script_content: str,
+        name: str,
+        description: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+    ) -> CodeJob:
+        """
+        Create and submit a bash job from script content.
+
+        Args:
+            target_email: Email of the data owner/datasite
+            script_content: Bash script content
+            name: Human-readable name for the job
+            description: Optional description
+            tags: Optional tags for categorization
+
+        Returns:
+            CodeJob: The submitted job object with API methods attached
+        """
+        # Create temporary directory
+        temp_dir = Path(tempfile.mkdtemp())
+
+        try:
+            # Create bash script file
+            script_file = temp_dir / "script.sh"
+            script_file.write_text(script_content)
+            script_file.chmod(0o755)
+
+            # Create run.sh for bash execution
+            run_content = "#!/bin/bash\nset -e\n./script.sh\n"
+
+            run_script = temp_dir / "run.sh"
+            run_script.write_text(run_content)
+            run_script.chmod(0o755)
+
+            # Submit the job
+            return self.submit_code(
+                target_email=target_email,
+                code_folder=temp_dir,
+                name=name,
+                description=description,
+                tags=tags,
+            )
+
+        finally:
+            # Note: We don't delete temp_dir here because it's copied by submit_code
+            # The temp directory will be cleaned up by the system later
+            pass
+
     def submit_code(
         self,
                     target_email: str,
@@ -439,6 +536,9 @@ class CodeQueueClient:
         target_queue_dir = self._get_target_queue_dir(target_email)
         job._datasite_path = target_queue_dir
         
+        # Ensure target's pending directory exists with proper permissions BEFORE copying/saving
+        self._ensure_target_pending_directory(target_email)
+        
         # Copy code to target's queue location
         self._copy_code_to_queue(job)
         
@@ -471,9 +571,7 @@ class CodeQueueClient:
                     if date_field in data and data[date_field] and isinstance(data[date_field], str):
                         data[date_field] = datetime.fromisoformat(data[date_field])
                 
-                job = CodeJob.model_validate(data)
-                job._client = self  # Set client reference
-                return job
+                return CodeJob.model_validate(data)
         
         # If not found locally, search across all datasites
         logger.debug(f"Job {job_uid} not found locally, searching across all datasites")
@@ -607,8 +705,6 @@ class CodeQueueClient:
         
         job.update_status(JobStatus.rejected, "Cancelled by requester")
         self._save_job(job)
-        # Invalidate cache so job status reflects the change immediately
-        job.refresh()
         return True
     
     def _copy_code_to_queue(self, job: CodeJob):
@@ -617,6 +713,11 @@ class CodeQueueClient:
         
         try:
             job_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Ensure syftperm exists for pending directories when copying to cross-datasite locations
+            if (job.status == JobStatus.pending and 
+                hasattr(job, '_datasite_path') and job._datasite_path is not None):
+                self._create_pending_syftperm(job_dir.parent)
             
             code_dir = job_dir / "code"
             if code_dir.exists():
@@ -725,8 +826,6 @@ class CodeQueueClient:
             job.update_status(JobStatus.approved)
             logger.debug(f"Saving approved job {job_uid} to reviewer's datasite")
             self._save_job(job)
-            # Invalidate cache so job status reflects the change immediately
-            job.refresh()
             logger.info(f"Approved job '{job.name}' - moved to approved folder in {self.email}'s datasite")
             return True
         except Exception as e:
@@ -766,8 +865,6 @@ class CodeQueueClient:
 
             job.update_status(JobStatus.rejected, reason)
             self._save_job(job)
-            # Invalidate cache so job status reflects the change immediately
-            job.refresh()
 
             logger.info(f"Rejected job '{job.name}' - moved to rejected folder in {self.email}'s datasite")
             return True

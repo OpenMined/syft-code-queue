@@ -47,7 +47,7 @@ class CodeQueueClient:
                 status_dir.mkdir(parents=True, exist_ok=True)
                 logger.debug(f"Created status directory: {status_dir}")
                 
-                # Create syftperm file for pending folder to allow cross-datasite writes
+                # Create syft.pub.yaml file for pending folder to allow cross-datasite writes
                 if status == JobStatus.pending:
                     self._create_pending_syftperm(status_dir)
                     logger.info(f"Initialized pending directory with cross-datasite permissions: {status_dir}")
@@ -70,10 +70,10 @@ class CodeQueueClient:
         return self.syftbox_client.app_data(self.queue_name) / "jobs"
     
     def _create_pending_syftperm(self, pending_dir: Path):
-        """Create syftperm file for pending directory to allow cross-datasite writes."""
-        syftperm_file = pending_dir / ".syftperm"
+        """Create syft.pub.yaml file for pending directory to allow cross-datasite writes."""
+        syftperm_file = pending_dir / "syft.pub.yaml"
         
-        # Required syftperm content for cross-datasite writes
+        # Required syft.pub.yaml content for cross-datasite writes
         required_syftperm_content = """rules:
 - pattern: '**'
   access:
@@ -87,7 +87,7 @@ class CodeQueueClient:
             # Always ensure the pending directory exists
             pending_dir.mkdir(parents=True, exist_ok=True)
             
-            # Check if syftperm file exists and has correct content
+            # Check if syft.pub.yaml file exists and has correct content
             needs_creation = True
             if syftperm_file.exists():
                 try:
@@ -95,32 +95,32 @@ class CodeQueueClient:
                     required_content = required_syftperm_content.strip()
                     if existing_content == required_content:
                         needs_creation = False
-                        logger.debug(f"Correct .syftperm file already exists in {pending_dir}")
+                        logger.debug(f"Correct syft.pub.yaml file already exists in {pending_dir}")
                     else:
-                        logger.info(f"Updating .syftperm file in {pending_dir} with correct permissions")
+                        logger.info(f"Updating syft.pub.yaml file in {pending_dir} with correct permissions")
                 except Exception as e:
-                    logger.warning(f"Could not read existing .syftperm file in {pending_dir}: {e}")
+                    logger.warning(f"Could not read existing syft.pub.yaml file in {pending_dir}: {e}")
             
-            # Create or update the syftperm file if needed
+            # Create or update the syft.pub.yaml file if needed
             if needs_creation:
                 with open(syftperm_file, 'w') as f:
                     f.write(required_syftperm_content)
-                logger.info(f"Created/updated .syftperm file for pending directory: {pending_dir}")
+                logger.info(f"Created/updated syft.pub.yaml file for pending directory: {pending_dir}")
                 
         except PermissionError as e:
-            logger.error(f"Permission denied creating .syftperm file in {pending_dir}: {e}")
-            raise RuntimeError(f"Cannot create syftperm file - insufficient permissions: {e}")
+            logger.error(f"Permission denied creating syft.pub.yaml file in {pending_dir}: {e}")
+            raise RuntimeError(f"Cannot create syft.pub.yaml file - insufficient permissions: {e}")
         except Exception as e:
-            logger.error(f"Failed to create .syftperm file in {pending_dir}: {e}")
+            logger.error(f"Failed to create syft.pub.yaml file in {pending_dir}: {e}")
             raise RuntimeError(f"Failed to setup pending directory permissions: {e}")
 
     def _ensure_target_pending_directory(self, target_email: str):
-        """Ensure the target's pending directory exists with proper syftperm for cross-datasite writes."""
+        """Ensure the target's pending directory exists with proper syft.pub.yaml for cross-datasite writes."""
         target_queue_dir = self._get_target_queue_dir(target_email)
         pending_dir = target_queue_dir / JobStatus.pending.value
         
         try:
-            # Create pending directory and syftperm file (handles both directory creation and permissions)
+            # Create pending directory and syft.pub.yaml file (handles both directory creation and permissions)
             self._create_pending_syftperm(pending_dir)
             logger.debug(f"Ensured pending directory exists with permissions for {target_email}")
         except Exception as e:
@@ -173,7 +173,7 @@ class CodeQueueClient:
                     try:
                         # Move the entire job directory
                         new_job_dir.parent.mkdir(parents=True, exist_ok=True)
-                        # Ensure syftperm exists for pending directories
+                        # Ensure syft.pub.yaml exists for pending directories
                         if job.status == JobStatus.pending:
                             self._create_pending_syftperm(new_job_dir.parent)
                         if new_job_dir.exists():
@@ -191,7 +191,7 @@ class CodeQueueClient:
             job_dir = get_cross_datasite_job_dir(job.status)
             try:
                 job_dir.mkdir(parents=True, exist_ok=True)
-                # Ensure syftperm exists for pending directories in cross-datasite jobs
+                # Ensure syft.pub.yaml exists for pending directories in cross-datasite jobs
                 if job.status == JobStatus.pending:
                     self._create_pending_syftperm(job_dir.parent)
                 job_file = job_dir / "metadata.json"
@@ -746,7 +746,7 @@ class CodeQueueClient:
         try:
             job_dir.mkdir(parents=True, exist_ok=True)
             
-            # Ensure syftperm exists for pending directories when copying to cross-datasite locations
+            # Ensure syft.pub.yaml exists for pending directories when copying to cross-datasite locations
             if (job.status == JobStatus.pending and 
                 hasattr(job, '_datasite_path') and job._datasite_path is not None):
                 self._create_pending_syftperm(job_dir.parent)

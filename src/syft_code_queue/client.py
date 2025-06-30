@@ -34,16 +34,12 @@ from .models import CodeJob, JobCreate, JobStatus, QueueConfig
 
 # Import syft-perm for permission management
 try:
-    from .syft_perm import set_file_permissions
+    from syft_perm import set_file_permissions
     SYFT_PERM_AVAILABLE = True
 except ImportError:
-    try:
-        from syft_perm import set_file_permissions
-        SYFT_PERM_AVAILABLE = True
-    except ImportError:
-        logger.warning("syft-perm not available - job permissions will not be set")
-        set_file_permissions = None
-        SYFT_PERM_AVAILABLE = False
+    logger.warning("syft-perm not available - job permissions will not be set")
+    set_file_permissions = None
+    SYFT_PERM_AVAILABLE = False
 
 
 class CodeQueueClient:

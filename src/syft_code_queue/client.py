@@ -850,18 +850,29 @@ class CodeQueueClient:
         logger.debug(f"Updating job {job_uid} status from {job.status} to approved in reviewer's datasite")
         
         try:
-            # Ensure the job is configured to be saved in the reviewer's own datasite
+            # For cross-datasite jobs, keep the job in the target's datasite
+            # For local jobs, ensure it's in the reviewer's datasite
             if not hasattr(job, '_datasite_path') or job._datasite_path is None:
-                # If no datasite path set, default to reviewer's own datasite
+                # Local job - save in reviewer's own datasite
                 job._datasite_path = self._get_target_queue_dir(self.email)
+                logger.debug(f"Approving local job {job_uid} - will save to reviewer's datasite")
+            else:
+                # Cross-datasite job - keep in target's datasite where it was originally submitted
+                logger.debug(f"Approving cross-datasite job {job_uid} - keeping in target's datasite")
             
             job.update_status(JobStatus.approved)
-            logger.debug(f"Saving approved job {job_uid} to reviewer's datasite")
             self._save_job(job)
-            logger.info(f"Approved job '{job.name}' - moved to approved folder in {self.email}'s datasite")
+            
+            # Log the appropriate location
+            if hasattr(job, '_datasite_path') and job._datasite_path is not None:
+                logger.info(f"Approved job '{job.name}' - moved to approved folder in target's datasite: {job._datasite_path}/approved/{job.uid}/")
+            else:
+                logger.info(f"Approved job '{job.name}' - moved to approved folder in {self.email}'s datasite")
             return True
         except Exception as e:
             logger.error(f"Failed to approve job {job_uid}: {e}")
+            logger.error(f"Job datasite path: {getattr(job, '_datasite_path', 'None')}")
+            logger.error(f"Job status: {job.status}")
             return False
 
     def reject_job(self, job_uid: Union[str, UUID], reason: Optional[str] = None) -> bool:
@@ -890,18 +901,29 @@ class CodeQueueClient:
             return False
 
         try:
-            # Ensure the job is configured to be saved in the reviewer's own datasite
+            # For cross-datasite jobs, keep the job in the target's datasite
+            # For local jobs, ensure it's in the reviewer's datasite
             if not hasattr(job, '_datasite_path') or job._datasite_path is None:
-                # If no datasite path set, default to reviewer's own datasite
+                # Local job - save in reviewer's own datasite
                 job._datasite_path = self._get_target_queue_dir(self.email)
+                logger.debug(f"Rejecting local job {job_uid} - will save to reviewer's datasite")
+            else:
+                # Cross-datasite job - keep in target's datasite where it was originally submitted
+                logger.debug(f"Rejecting cross-datasite job {job_uid} - keeping in target's datasite")
 
             job.update_status(JobStatus.rejected, reason)
             self._save_job(job)
 
-            logger.info(f"Rejected job '{job.name}' - moved to rejected folder in {self.email}'s datasite")
+            # Log the appropriate location
+            if hasattr(job, '_datasite_path') and job._datasite_path is not None:
+                logger.info(f"Rejected job '{job.name}' - moved to rejected folder in target's datasite: {job._datasite_path}/rejected/{job.uid}/")
+            else:
+                logger.info(f"Rejected job '{job.name}' - moved to rejected folder in {self.email}'s datasite")
             return True
         except Exception as e:
             logger.error(f"Failed to reject job {job_uid}: {e}")
+            logger.error(f"Job datasite path: {getattr(job, '_datasite_path', 'None')}")
+            logger.error(f"Job status: {job.status}")
             return False
 
     def list_job_files(self, job_uid: Union[str, UUID]) -> list[str]:

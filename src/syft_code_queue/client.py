@@ -47,10 +47,14 @@ class CodeQueueClient:
                 status_dir.mkdir(parents=True, exist_ok=True)
                 logger.debug(f"Created status directory: {status_dir}")
                 
-                # Create syft.pub.yaml file for pending folder to allow cross-datasite writes
+                # Create syft.pub.yaml files for all status directories
                 if status == JobStatus.pending:
+                    # Pending directory gets read/write permissions for cross-datasite job submission
                     self._create_pending_syftperm(status_dir)
                     logger.info(f"Initialized pending directory with cross-datasite permissions: {status_dir}")
+                else:
+                    # All other directories get read-only permissions for cross-datasite visibility
+                    self._create_readonly_syftperm(status_dir, status.value)
                     
             except Exception as e:
                 logger.error(f"Failed to initialize status directory {status_dir}: {e}")
@@ -113,6 +117,51 @@ class CodeQueueClient:
         except Exception as e:
             logger.error(f"Failed to create syft.pub.yaml file in {pending_dir}: {e}")
             raise RuntimeError(f"Failed to setup pending directory permissions: {e}")
+
+    def _create_readonly_syftperm(self, status_dir: Path, status_name: str):
+        """Create read-only syft.pub.yaml file for status directories."""
+        syftperm_file = status_dir / "syft.pub.yaml"
+        
+        # Required syft.pub.yaml content for read-only access
+        required_syftperm_content = """rules:
+- pattern: '**'
+  access:
+    read:
+    - '*'
+"""
+        
+        try:
+            # Always ensure the status directory exists
+            status_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Check if syft.pub.yaml file exists and has correct content
+            needs_creation = True
+            if syftperm_file.exists():
+                try:
+                    existing_content = syftperm_file.read_text().strip()
+                    required_content = required_syftperm_content.strip()
+                    if existing_content == required_content:
+                        needs_creation = False
+                        logger.debug(f"Correct read-only syft.pub.yaml file already exists in {status_dir}")
+                    else:
+                        logger.info(f"Updating syft.pub.yaml file in {status_dir} with read-only permissions")
+                except Exception as e:
+                    logger.warning(f"Could not read existing syft.pub.yaml file in {status_dir}: {e}")
+            
+            # Create or update the syft.pub.yaml file if needed
+            if needs_creation:
+                with open(syftperm_file, 'w') as f:
+                    f.write(required_syftperm_content)
+                logger.info(f"Created/updated read-only syft.pub.yaml file for {status_name} directory: {status_dir}")
+                
+        except PermissionError as e:
+            logger.error(f"Permission denied creating syft.pub.yaml file in {status_dir}: {e}")
+            # Don't raise for read-only directories - they're not critical for core functionality
+            logger.warning(f"Continuing without read-only syft.pub.yaml file in {status_dir}")
+        except Exception as e:
+            logger.error(f"Failed to create syft.pub.yaml file in {status_dir}: {e}")
+            # Don't raise for read-only directories - they're not critical for core functionality
+            logger.warning(f"Continuing without read-only syft.pub.yaml file in {status_dir}")
 
     def _ensure_target_pending_directory(self, target_email: str):
         """Ensure the target's pending directory exists with proper syft.pub.yaml for cross-datasite writes."""

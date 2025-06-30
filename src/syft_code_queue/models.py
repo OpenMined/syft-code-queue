@@ -165,6 +165,11 @@ class CodeJob(BaseModel):
 
     def get_logs(self) -> Optional[str]:
         """Get the execution logs for this job."""
+        # First try to return the logs field if it exists
+        if self.logs is not None:
+            return self.logs
+            
+        # If no logs field, try to get from client
         if self._client is None:
             raise RuntimeError("Job not connected to DataScientist API - cannot get logs")
         return self._client.get_job_logs(self.uid)

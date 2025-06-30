@@ -17,17 +17,17 @@ except ImportError:
     class MockSyftBoxClient:
         def __init__(self):
             self.email = "demo@example.com"
-
+        
         def app_data(self, app_name):
             import tempfile
             from pathlib import Path
 
             return Path(tempfile.gettempdir()) / f"syftbox_demo_{app_name}"
-
+        
         @classmethod
         def load(cls):
             return cls()
-
+    
     SyftBoxClient = MockSyftBoxClient
 
 from .models import CodeJob, JobCreate, JobStatus, QueueConfig
@@ -234,33 +234,33 @@ class CodeQueueClient:
 
     def submit_code(
         self,
-        target_email: str,
-        code_folder: Path,
-        name: str,
-        description: Optional[str] = None,
+                    target_email: str,
+                    code_folder: Path,
+                    name: str,
+                    description: Optional[str] = None,
         tags: Optional[list[str]] = None,
     ) -> CodeJob:
         """
         Submit code for execution on a remote datasite.
-
+        
         Args:
             target_email: Email of the data owner
             code_folder: Local folder containing code and run.sh
             name: Human-readable name for the job
             description: Optional description
             tags: Optional tags for categorization
-
+            
         Returns:
             CodeJob: The created job
         """
         # Validate code folder
         if not code_folder.exists():
             raise ValueError(f"Code folder does not exist: {code_folder}")
-
+        
         run_script = code_folder / "run.sh"
         if not run_script.exists():
             raise ValueError(f"Code folder must contain run.sh: {run_script}")
-
+        
         # Create job
         job_create = JobCreate(
             name=name,
@@ -272,39 +272,39 @@ class CodeQueueClient:
 
         job = CodeJob(**job_create.model_dump(), requester_email=self.email)
         job._client = self  # Set the client reference
-
+        
         # Copy code to queue location
         self._copy_code_to_queue(job)
-
+        
         # Save job to local queue
         self._save_job(job)
-
+        
         logger.info(f"Submitted job '{name}' to {target_email}")
         return job
-
+    
     def get_job(self, job_uid: UUID) -> Optional[CodeJob]:
         """Get a job by its UID."""
         job_file = self._get_job_file(job_uid)
         if not job_file.exists():
             return None
-
+        
         with open(job_file) as f:
             import json
             from datetime import datetime
             from uuid import UUID
 
             data = json.load(f)
-
+            
             # Convert string representations back to proper types
             if "uid" in data and isinstance(data["uid"], str):
                 data["uid"] = UUID(data["uid"])
-
+            
             for date_field in ["created_at", "updated_at", "started_at", "completed_at"]:
                 if date_field in data and data[date_field] and isinstance(data[date_field], str):
                     data[date_field] = datetime.fromisoformat(data[date_field])
-
+            
             return CodeJob.model_validate(data)
-
+    
     def list_my_jobs(self, limit: int = 50) -> list[CodeJob]:
         """List jobs submitted by me."""
         return self.list_jobs(target_email=None, limit=limit)
@@ -312,26 +312,26 @@ class CodeQueueClient:
     def list_all_jobs(self, limit: int = 50) -> list[CodeJob]:
         """List jobs submitted to me."""
         return self.list_jobs(target_email=self.email, limit=limit)
-
+    
     def get_job_output(self, job_uid: UUID) -> Optional[Path]:
         """Get the output folder for a completed job."""
         job = self.get_job(job_uid)
         if not job or not job.output_folder:
             return None
-
+        
         return job.output_folder
-
+    
     def get_job_logs(self, job_uid: UUID) -> Optional[str]:
         """Get execution logs for a job."""
         job = self.get_job(job_uid)
         if not job:
             return None
-
+        
         log_file = self._get_job_dir(job) / "execution.log"
         if log_file.exists():
             return log_file.read_text()
         return None
-
+    
     def wait_for_completion(self, job_uid: UUID, timeout: int = 600) -> CodeJob:
         """
         Wait for a job to complete.
@@ -382,27 +382,27 @@ class CodeQueueClient:
         job = self.get_job(job_uid)
         if not job:
             return False
-
+        
         if job.status not in (JobStatus.pending, JobStatus.approved):
             logger.warning(f"Cannot cancel job {job_uid} with status {job.status}")
             return False
-
+        
         job.update_status(JobStatus.rejected, "Cancelled by requester")
         self._save_job(job)
         return True
-
+    
     def _copy_code_to_queue(self, job: CodeJob):
         """Copy code folder to the queue location."""
         job_dir = self._get_job_dir(job)
         job_dir.mkdir(parents=True, exist_ok=True)
-
+        
         code_dir = job_dir / "code"
         if code_dir.exists():
             shutil.rmtree(code_dir)
-
+        
         shutil.copytree(job.code_folder, code_dir)
         job.code_folder = code_dir  # Update to queue location
-
+    
     def approve_job(self, job_uid: Union[str, UUID], reason: Optional[str] = None) -> bool:
         """
         Approve a job for execution.
@@ -465,11 +465,11 @@ class CodeQueueClient:
 def create_client(target_email: str = None, **config_kwargs) -> CodeQueueClient:
     """
     Create a code queue client.
-
+    
     Args:
         target_email: If provided, optimizes for submitting to this target
         **config_kwargs: Additional configuration options
-
+        
     Returns:
         CodeQueueClient instance
     """

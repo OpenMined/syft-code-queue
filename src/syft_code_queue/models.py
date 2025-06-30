@@ -49,6 +49,7 @@ class CodeJob(BaseModel):
     output_folder: Optional[Path] = None
     error_message: Optional[str] = None
     exit_code: Optional[int] = None
+    logs: Optional[str] = None  # Execution logs (stdout/stderr)
 
     # Metadata
     tags: list[str] = Field(default_factory=list)

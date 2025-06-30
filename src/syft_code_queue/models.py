@@ -172,10 +172,23 @@ class CodeJob(BaseModel):
             import json
             from uuid import UUID
             
-            # Find the job file using client's methods
-            job_file = self._client._get_job_file(self.uid)
+            # Find the job file using cross-datasite aware search
+            job_file = self._client._find_job_file_anywhere(self.uid, self._datasite_path)
             if not job_file or not job_file.exists():
                 return self._get_current_values_dict()
+            
+            # Update _datasite_path if we found the job in a different location
+            if job_file and job_file.exists():
+                # Extract the queue directory from the job file path
+                # job_file format: .../datasite/app_data/code-queue/jobs/status/uid/metadata.json
+                job_file_parts = job_file.parts
+                if len(job_file_parts) >= 4 and 'jobs' in job_file_parts:
+                    jobs_index = job_file_parts.index('jobs')
+                    if jobs_index >= 3:
+                        queue_dir = Path(*job_file_parts[:jobs_index+1])
+                        # Update _datasite_path if it has changed
+                        if self._datasite_path != queue_dir:
+                            self._datasite_path = queue_dir
             
             # Read raw data from file
             with open(job_file) as f:

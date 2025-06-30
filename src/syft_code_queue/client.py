@@ -184,7 +184,7 @@ class CodeQueueClient:
         return self._get_status_dir(job.status) / str(job.uid)
 
     def _get_job_file(self, job_uid: UUID) -> Optional[Path]:
-        """Get the metadata.json file path for a job."""
+        """Get the metadata.json file path for a job (local datasite only)."""
         # Search in all status directories
         for status in JobStatus:
             job_dir = self._get_status_dir(status) / str(job_uid)
@@ -196,6 +196,48 @@ class CodeQueueClient:
         # If not found, return path in pending directory (for new jobs)
         job_dir = self._get_status_dir(JobStatus.pending) / str(job_uid)
         return job_dir / "metadata.json"
+
+    def _get_cross_datasite_job_file(self, job_uid: UUID, datasite_queue_dir: Path) -> Optional[Path]:
+        """Get the metadata.json file path for a cross-datasite job."""
+        # Search in all status directories within the specified datasite
+        for status in JobStatus:
+            job_dir = datasite_queue_dir / status.value / str(job_uid)
+            if job_dir.exists():
+                job_file = job_dir / "metadata.json"
+                if job_file.exists():
+                    return job_file
+        return None
+
+    def _find_job_file_anywhere(self, job_uid: UUID, datasite_path: Optional[Path] = None) -> Optional[Path]:
+        """Find a job file, searching both local and cross-datasite locations."""
+        # If we have a known datasite path, search there first
+        if datasite_path is not None:
+            cross_datasite_file = self._get_cross_datasite_job_file(job_uid, datasite_path)
+            if cross_datasite_file and cross_datasite_file.exists():
+                return cross_datasite_file
+        
+        # Then search local datasite
+        local_file = self._get_job_file(job_uid)
+        if local_file and local_file.exists():
+            return local_file
+            
+        # If we didn't have a known datasite path, search all datasites
+        if datasite_path is None:
+            try:
+                datasites_dir = self.syftbox_client.datasites
+                if datasites_dir.exists():
+                    for datasite_dir in datasites_dir.iterdir():
+                        if not datasite_dir.is_dir():
+                            continue
+                        queue_dir = datasite_dir / "app_data" / self.queue_name / "jobs"
+                        if queue_dir.exists():
+                            cross_datasite_file = self._get_cross_datasite_job_file(job_uid, queue_dir)
+                            if cross_datasite_file and cross_datasite_file.exists():
+                                return cross_datasite_file
+            except Exception:
+                pass  # Fall back to None if search fails
+                
+        return None
 
     def _save_job(self, job: CodeJob):
         """Save job to local storage or original datasite location."""

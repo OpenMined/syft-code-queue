@@ -1841,6 +1841,10 @@ class FilesystemReviewWidget:
         let fileContents = {file_contents_js};
         
         function loadFileReview(filename) {{
+            console.log('loadFileReview called with filename:', filename);
+            console.log('fileContents object:', fileContents);
+            console.log('Available keys:', Object.keys(fileContents));
+            
             // Update active file styling
             document.querySelectorAll('.file-item').forEach(item => {{
                 item.classList.remove('active');
@@ -1852,6 +1856,10 @@ class FilesystemReviewWidget:
             
             // Get file content from pre-loaded data
             let content = fileContents[filename];
+            console.log('Content for', filename, ':', content);
+            console.log('Content exists:', !!content);
+            console.log('Content type:', typeof content);
+            
             if (content) {{
                 // Display the actual file content
                 document.getElementById('file-content').textContent = content;
@@ -1860,9 +1868,11 @@ class FilesystemReviewWidget:
                 let lines = content.split('\\n').length;
                 let chars = content.length;
                 document.getElementById('file-meta').textContent = `${{lines}} lines • ${{chars}} characters`;
+                console.log('Successfully loaded content for', filename);
             }} else {{
                 document.getElementById('file-content').textContent = 'File content not available.';
                 document.getElementById('file-meta').textContent = 'Content not loaded';
+                console.log('ERROR: No content found for', filename);
             }}
         }}
         
@@ -1917,8 +1927,14 @@ else:
         }}
         
         // Initialize first file as active
+        console.log('Initializing filesystem review widget');
+        console.log('jobFiles:', jobFiles);
+        console.log('fileContents keys:', Object.keys(fileContents));
+        console.log('fileContents values lengths:', Object.keys(fileContents).map(k => k + ': ' + fileContents[k].length + ' chars'));
+        
         if (jobFiles.length > 0) {{
             let firstFile = jobFiles[0];
+            console.log('Setting first file as active:', firstFile);
             document.querySelector(`[data-filename="${{firstFile}}"]`).classList.add('active');
             
             // Show metadata for the first file
@@ -1927,7 +1943,12 @@ else:
                 let lines = firstContent.split('\\n').length;
                 let chars = firstContent.length;
                 document.getElementById('file-meta').textContent = `${{lines}} lines • ${{chars}} characters`;
+                console.log('First file metadata set:', lines, 'lines,', chars, 'chars');
+            }} else {{
+                console.log('ERROR: No content for first file:', firstFile);
             }}
+        }} else {{
+            console.log('ERROR: No files to initialize');
         }}
         </script>
         """

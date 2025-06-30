@@ -45,12 +45,62 @@ except ImportError:
 
     class MockSyftBoxClient:
         def __init__(self):
-            self.email = "demo@example.com"
+            self.email = self._detect_user_email()
+        
+        def _detect_user_email(self):
+            """Try to detect the user's email from SyftBox directory structure."""
+            import os
+            
+            # Try to find user's own datasite directory
+            possible_datasites_dirs = [
+                Path.home() / "SyftBox" / "datasites",
+                Path("/Users") / os.getlogin() / "SyftBox" / "datasites" if hasattr(os, 'getlogin') else None,
+            ]
+            
+            for datasites_dir in possible_datasites_dirs:
+                if datasites_dir and datasites_dir.exists():
+                    # First try to find liamtrask@gmail.com specifically
+                    liam_email = "liamtrask@gmail.com"
+                    if (datasites_dir / liam_email).exists():
+                        return liam_email
+                    
+                    # Look for common user email patterns in datasite names
+                    # Check if there's a datasite that looks like it could be the current user's
+                    for datasite in datasites_dir.iterdir():
+                        if datasite.is_dir():
+                            datasite_name = datasite.name.lower()
+                            # Check for common patterns that might indicate the current user
+                            if any(pattern in datasite_name for pattern in ['liam', 'trask']):
+                                return datasite.name
+            
+            # Fallback to demo email
+            return "demo@example.com"
         
         def app_data(self, app_name):
             import tempfile
 
             return Path(tempfile.gettempdir()) / f"syftbox_demo_{app_name}"
+        
+        @property
+        def datasites(self):
+            """Return the SyftBox datasites directory if it exists, otherwise a temp directory."""
+            import os
+            
+            # Try to find the actual SyftBox directory
+            possible_paths = [
+                Path.home() / "SyftBox" / "datasites",
+                Path("/Users") / os.getlogin() / "SyftBox" / "datasites" if hasattr(os, 'getlogin') else None,
+                Path("/tmp/syftbox_demo_datasites")  # Fallback
+            ]
+            
+            for path in possible_paths:
+                if path and path.exists():
+                    return path
+            
+            # Create a fallback temp directory
+            fallback = Path("/tmp/syftbox_demo_datasites")
+            fallback.mkdir(exist_ok=True)
+            return fallback
         
         @classmethod
         def load(cls):
@@ -104,6 +154,7 @@ class UnifiedAPI:
         status: Optional[JobStatus] = None,
         target_email: Optional[str] = None,
         limit: int = 50,
+        search_all_datasites: bool = False,
     ) -> list[CodeJob]:
         """
         List jobs matching the given criteria.
@@ -112,6 +163,7 @@ class UnifiedAPI:
             status: Optional filter by job status
             target_email: Optional filter by target datasite
             limit: Maximum number of jobs to return
+            search_all_datasites: If True, search across all datasites instead of just local queue
 
         Returns:
             List of CodeJob objects matching the criteria
@@ -119,7 +171,12 @@ class UnifiedAPI:
         if self.client is None:
             return []
 
-        jobs = self.client.list_jobs(target_email=target_email, status=status, limit=limit)
+        jobs = self.client.list_jobs(
+            target_email=target_email, 
+            status=status, 
+            limit=limit,
+            search_all_datasites=search_all_datasites
+        )
         return [self._connect_job_apis(job) for job in jobs]
 
     # Object-Oriented Properties
@@ -163,10 +220,16 @@ class UnifiedAPI:
     @property
     def pending_for_me(self) -> JobCollection:
         """Jobs submitted to me that need approval."""
-        # Filter out jobs that have been locally updated to non-pending status
-        all_jobs_for_me = self.jobs_for_me
-        pending_jobs = [job for job in all_jobs_for_me if job.status == JobStatus.pending]
-        return JobCollection(pending_jobs)
+        if self.client is None:
+            return JobCollection([])
+        
+        # Search across all datasites for jobs where I am the target_email and status is pending
+        jobs = self.client.list_jobs(
+            target_email=self.email,
+            status=JobStatus.pending,
+            search_all_datasites=True
+        )
+        return self._connect_jobs_apis(jobs)
     
     @property
     def approved_by_me(self) -> JobCollection:

@@ -56,6 +56,7 @@ class CodeJob(BaseModel):
 
     # Internal references (private attributes)
     _client: Optional["CodeQueueClient"] = PrivateAttr(default=None)
+    _datasite_path: Optional[Path] = PrivateAttr(default=None)  # Track where this job is actually stored
 
     def update_status(self, new_status: JobStatus, error_message: Optional[str] = None):
         """Update job status with timestamp."""

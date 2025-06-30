@@ -16,13 +16,64 @@ except ImportError:
     # Fallback for tutorial/demo purposes
     class MockSyftBoxClient:
         def __init__(self):
-            self.email = "demo@example.com"
+            self.email = self._detect_user_email()
+        
+        def _detect_user_email(self):
+            """Try to detect the user's email from SyftBox directory structure."""
+            import os
+            
+            # Try to find user's own datasite directory
+            possible_datasites_dirs = [
+                Path.home() / "SyftBox" / "datasites",
+                Path("/Users") / os.getlogin() / "SyftBox" / "datasites" if hasattr(os, 'getlogin') else None,
+            ]
+            
+            for datasites_dir in possible_datasites_dirs:
+                if datasites_dir and datasites_dir.exists():
+                    # First try to find liamtrask@gmail.com specifically
+                    liam_email = "liamtrask@gmail.com"
+                    if (datasites_dir / liam_email).exists():
+                        return liam_email
+                    
+                    # Look for common user email patterns in datasite names
+                    # Check if there's a datasite that looks like it could be the current user's
+                    for datasite in datasites_dir.iterdir():
+                        if datasite.is_dir():
+                            datasite_name = datasite.name.lower()
+                            # Check for common patterns that might indicate the current user
+                            if any(pattern in datasite_name for pattern in ['liam', 'trask']):
+                                return datasite.name
+            
+            # Fallback to demo email
+            return "demo@example.com"
         
         def app_data(self, app_name):
             import tempfile
             from pathlib import Path
 
             return Path(tempfile.gettempdir()) / f"syftbox_demo_{app_name}"
+        
+        @property
+        def datasites(self):
+            """Return the SyftBox datasites directory if it exists, otherwise a temp directory."""
+            from pathlib import Path
+            import os
+            
+            # Try to find the actual SyftBox directory
+            possible_paths = [
+                Path.home() / "SyftBox" / "datasites",
+                Path("/Users") / os.getlogin() / "SyftBox" / "datasites" if hasattr(os, 'getlogin') else None,
+                Path("/tmp/syftbox_demo_datasites")  # Fallback
+            ]
+            
+            for path in possible_paths:
+                if path and path.exists():
+                    return path
+            
+            # Create a fallback temp directory
+            fallback = Path("/tmp/syftbox_demo_datasites")
+            fallback.mkdir(exist_ok=True)
+            return fallback
         
         @classmethod
         def load(cls):
@@ -74,47 +125,107 @@ class CodeQueueClient:
         return job_dir / "metadata.json"
 
     def _save_job(self, job: CodeJob):
-        """Save job to local storage."""
+        """Save job to local storage or original datasite location."""
         old_job = self.get_job(job.uid)
         old_status = old_job.status if old_job else None
 
-        # If status changed, move job directory to new status directory
-        if old_status and old_status != job.status:
-            old_job_dir = self._get_status_dir(old_status) / str(job.uid)
-            new_job_dir = self._get_job_dir(job)
+        # Determine if this is a cross-datasite job
+        if hasattr(job, '_datasite_path') and job._datasite_path is not None:
+            # Cross-datasite job - work with the original datasite location
+            base_queue_dir = job._datasite_path
+            
+            def get_cross_datasite_status_dir(status: JobStatus) -> Path:
+                return base_queue_dir / status.value
+            
+            def get_cross_datasite_job_dir(job_status: JobStatus) -> Path:
+                return get_cross_datasite_status_dir(job_status) / str(job.uid)
+            
+            # If status changed, move job directory to new status directory
+            if old_status and old_status != job.status:
+                old_job_dir = get_cross_datasite_status_dir(old_status) / str(job.uid)
+                new_job_dir = get_cross_datasite_job_dir(job.status)
 
-            if old_job_dir.exists():
-                # Move the entire job directory
-                new_job_dir.parent.mkdir(parents=True, exist_ok=True)
-                if new_job_dir.exists():
-                    shutil.rmtree(new_job_dir)
-                shutil.move(str(old_job_dir), str(new_job_dir))
+                if old_job_dir.exists():
+                    try:
+                        # Move the entire job directory
+                        new_job_dir.parent.mkdir(parents=True, exist_ok=True)
+                        if new_job_dir.exists():
+                            shutil.rmtree(new_job_dir)
+                        shutil.move(str(old_job_dir), str(new_job_dir))
+                        logger.info(f"Moved job {job.uid} from {old_status} to {job.status} in datasite")
+                    except PermissionError as e:
+                        logger.error(f"Permission denied moving job {job.uid}: {e}")
+                        raise RuntimeError(f"Cannot approve job - insufficient permissions to modify job in original datasite")
+                    except Exception as e:
+                        logger.error(f"Error moving job {job.uid}: {e}")
+                        raise RuntimeError(f"Failed to move job: {e}")
 
-        # Ensure job directory exists
-        job_dir = self._get_job_dir(job)
-        job_dir.mkdir(parents=True, exist_ok=True)
+            # Ensure job directory exists and save metadata
+            job_dir = get_cross_datasite_job_dir(job.status)
+            try:
+                job_dir.mkdir(parents=True, exist_ok=True)
+                job_file = job_dir / "metadata.json"
 
-        # Save metadata file inside job directory
-        job_file = job_dir / "metadata.json"
+                with open(job_file, "w") as f:
+                    def custom_serializer(obj):
+                        if isinstance(obj, Path):
+                            return str(obj)
+                        elif isinstance(obj, UUID):
+                            return str(obj)
+                        elif isinstance(obj, datetime):
+                            return obj.isoformat()
+                        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
-        with open(job_file, "w") as f:
+                    json.dump(job.model_dump(), f, indent=2, default=custom_serializer)
+                    
+                logger.info(f"Updated job {job.uid} metadata in original datasite")
+                
+            except PermissionError as e:
+                logger.error(f"Permission denied updating job {job.uid} metadata: {e}")
+                raise RuntimeError(f"Cannot approve job - insufficient permissions to update job in original datasite")
+            except Exception as e:
+                logger.error(f"Error updating job {job.uid} metadata: {e}")
+                raise RuntimeError(f"Failed to update job metadata: {e}")
+        else:
+            # Local job - use original logic
+            # If status changed, move job directory to new status directory
+            if old_status and old_status != job.status:
+                old_job_dir = self._get_status_dir(old_status) / str(job.uid)
+                new_job_dir = self._get_job_dir(job)
 
-            def custom_serializer(obj):
-                if isinstance(obj, Path):
-                    return str(obj)
-                elif isinstance(obj, UUID):
-                    return str(obj)
-                elif isinstance(obj, datetime):
-                    return obj.isoformat()
-                raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+                if old_job_dir.exists():
+                    # Move the entire job directory
+                    new_job_dir.parent.mkdir(parents=True, exist_ok=True)
+                    if new_job_dir.exists():
+                        shutil.rmtree(new_job_dir)
+                    shutil.move(str(old_job_dir), str(new_job_dir))
 
-            json.dump(job.model_dump(), f, indent=2, default=custom_serializer)
+            # Ensure job directory exists
+            job_dir = self._get_job_dir(job)
+            job_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save metadata file inside job directory
+            job_file = job_dir / "metadata.json"
+
+            with open(job_file, "w") as f:
+
+                def custom_serializer(obj):
+                    if isinstance(obj, Path):
+                        return str(obj)
+                    elif isinstance(obj, UUID):
+                        return str(obj)
+                    elif isinstance(obj, datetime):
+                        return obj.isoformat()
+                    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+                json.dump(job.model_dump(), f, indent=2, default=custom_serializer)
 
     def list_jobs(
         self,
         target_email: Optional[str] = None,
         status: Optional[JobStatus] = None,
         limit: int = 50,
+        search_all_datasites: bool = False,
     ) -> list[CodeJob]:
         """
         List jobs, optionally filtered.
@@ -123,56 +234,155 @@ class CodeQueueClient:
             target_email: Filter by target email
             status: Filter by job status
             limit: Maximum number of jobs to return
+            search_all_datasites: If True, search across all datasites instead of just local queue
 
         Returns:
             List of matching jobs
         """
         jobs = []
 
-        # Determine which status directories to search
-        if status:
-            status_dirs = [self._get_status_dir(status)]
+        if search_all_datasites:
+            # Search across all datasites for jobs where current user is target_email
+            jobs = self._search_all_datasites_for_jobs(target_email, status, limit)
         else:
-            status_dirs = [self._get_status_dir(s) for s in JobStatus]
+            # Original behavior: search only local queue directory
+            # Determine which status directories to search
+            if status:
+                status_dirs = [self._get_status_dir(status)]
+            else:
+                status_dirs = [self._get_status_dir(s) for s in JobStatus]
 
-        # Search in each status directory
-        for status_dir in status_dirs:
-            if not status_dir.exists():
-                continue
-
-            # Look for job directories with metadata.json
-            for job_dir in status_dir.glob("*"):
-                if not job_dir.is_dir():
+            # Search in each status directory
+            for status_dir in status_dirs:
+                if not status_dir.exists():
                     continue
 
-                try:
-                    metadata_file = job_dir / "metadata.json"
-                    if not metadata_file.exists():
+                # Look for job directories with metadata.json
+                for job_dir in status_dir.glob("*"):
+                    if not job_dir.is_dir():
                         continue
 
-                    with open(metadata_file) as f:
-                        data = json.load(f)
-                        job = CodeJob.model_validate(data)
-                        job._client = self  # Set client reference
-
-                        # Apply filters
-                        if target_email and job.target_email != target_email:
+                    try:
+                        metadata_file = job_dir / "metadata.json"
+                        if not metadata_file.exists():
                             continue
 
-                        jobs.append(job)
+                        with open(metadata_file) as f:
+                            data = json.load(f)
+                            job = CodeJob.model_validate(data)
+                            job._client = self  # Set client reference
 
-                        if len(jobs) >= limit:
-                            break
+                            # Apply filters
+                            if target_email and job.target_email != target_email:
+                                continue
 
-                except Exception as e:
-                    logger.warning(f"Failed to load job from {metadata_file}: {e}")
-                    continue
+                            jobs.append(job)
 
-            if len(jobs) >= limit:
-                break
+                            if len(jobs) >= limit:
+                                break
+
+                    except Exception as e:
+                        logger.warning(f"Failed to load job from {metadata_file}: {e}")
+                        continue
+
+                if len(jobs) >= limit:
+                    break
 
         # Sort by creation time, newest first
         jobs.sort(key=lambda j: j.created_at, reverse=True)
+        return jobs
+
+    def _search_all_datasites_for_jobs(
+        self,
+        target_email: Optional[str] = None,
+        status: Optional[JobStatus] = None,
+        limit: int = 50,
+    ) -> list[CodeJob]:
+        """
+        Search across all datasites for jobs.
+        
+        Args:
+            target_email: Filter by target email
+            status: Filter by job status
+            limit: Maximum number of jobs to return
+            
+        Returns:
+            List of matching jobs
+        """
+        jobs = []
+        
+        try:
+            # Get the datasites directory
+            datasites_dir = self.syftbox_client.datasites
+            if not datasites_dir.exists():
+                logger.warning(f"Datasites directory does not exist: {datasites_dir}")
+                return jobs
+
+            logger.debug(f"Searching for jobs across all datasites in: {datasites_dir}")
+
+            # Iterate through all datasites
+            for datasite_dir in datasites_dir.iterdir():
+                if not datasite_dir.is_dir():
+                    continue
+
+                # Check if this datasite has the code queue app
+                queue_dir = datasite_dir / "app_data" / self.queue_name / "jobs"
+                if not queue_dir.exists():
+                    continue
+
+                logger.debug(f"Searching in datasite: {datasite_dir.name}")
+
+                # Determine which status directories to search
+                if status:
+                    status_dirs = [queue_dir / status.value]
+                else:
+                    status_dirs = [queue_dir / s.value for s in JobStatus]
+
+                # Search in each status directory for this datasite
+                for status_dir in status_dirs:
+                    if not status_dir.exists():
+                        continue
+
+                    # Look for job directories with metadata.json
+                    for job_dir in status_dir.glob("*"):
+                        if not job_dir.is_dir():
+                            continue
+
+                        try:
+                            metadata_file = job_dir / "metadata.json"
+                            if not metadata_file.exists():
+                                continue
+
+                            with open(metadata_file) as f:
+                                data = json.load(f)
+                                job = CodeJob.model_validate(data)
+                                job._client = self  # Set client reference
+                                
+                                # Track the original datasite queue directory for cross-datasite jobs
+                                job._datasite_path = queue_dir
+
+                                # Apply filters
+                                if target_email and job.target_email != target_email:
+                                    continue
+
+                                jobs.append(job)
+
+                                if len(jobs) >= limit:
+                                    break
+
+                        except Exception as e:
+                            logger.warning(f"Failed to load job from {metadata_file}: {e}")
+                            continue
+
+                    if len(jobs) >= limit:
+                        break
+
+                if len(jobs) >= limit:
+                    break
+
+        except Exception as e:
+            logger.error(f"Error searching all datasites for jobs: {e}")
+
         return jobs
 
     def create_python_job(
@@ -279,31 +489,77 @@ class CodeQueueClient:
         # Save job to local queue
         self._save_job(job)
         
+        # Set up permissions for cross-datasite job approval
+        self._setup_job_permissions(job)
+        
         logger.info(f"Submitted job '{name}' to {target_email}")
         return job
     
     def get_job(self, job_uid: UUID) -> Optional[CodeJob]:
-        """Get a job by its UID."""
+        """Get a job by its UID, searching locally first then across all datasites."""
+        # First try to find the job locally
         job_file = self._get_job_file(job_uid)
-        if not job_file.exists():
-            return None
-        
-        with open(job_file) as f:
-            import json
-            from datetime import datetime
-            from uuid import UUID
+        if job_file.exists():
+            with open(job_file) as f:
+                import json
+                from datetime import datetime
+                from uuid import UUID
 
-            data = json.load(f)
-            
-            # Convert string representations back to proper types
-            if "uid" in data and isinstance(data["uid"], str):
-                data["uid"] = UUID(data["uid"])
-            
-            for date_field in ["created_at", "updated_at", "started_at", "completed_at"]:
-                if date_field in data and data[date_field] and isinstance(data[date_field], str):
-                    data[date_field] = datetime.fromisoformat(data[date_field])
-            
-            return CodeJob.model_validate(data)
+                data = json.load(f)
+                
+                # Convert string representations back to proper types
+                if "uid" in data and isinstance(data["uid"], str):
+                    data["uid"] = UUID(data["uid"])
+                
+                for date_field in ["created_at", "updated_at", "started_at", "completed_at"]:
+                    if date_field in data and data[date_field] and isinstance(data[date_field], str):
+                        data[date_field] = datetime.fromisoformat(data[date_field])
+                
+                return CodeJob.model_validate(data)
+        
+        # If not found locally, search across all datasites
+        logger.debug(f"Job {job_uid} not found locally, searching across all datasites")
+        
+        try:
+            datasites_dir = self.syftbox_client.datasites
+            if not datasites_dir.exists():
+                return None
+
+            # Search through all datasites
+            for datasite_dir in datasites_dir.iterdir():
+                if not datasite_dir.is_dir():
+                    continue
+
+                # Check if this datasite has the code queue app
+                queue_dir = datasite_dir / "app_data" / self.queue_name / "jobs"
+                if not queue_dir.exists():
+                    continue
+
+                # Search in all status directories for this datasite
+                for status in JobStatus:
+                    status_dir = queue_dir / status.value
+                    if not status_dir.exists():
+                        continue
+                        
+                    job_dir = status_dir / str(job_uid)
+                    if job_dir.exists():
+                        metadata_file = job_dir / "metadata.json"
+                        if metadata_file.exists():
+                            with open(metadata_file) as f:
+                                import json
+                                data = json.load(f)
+                                job = CodeJob.model_validate(data)
+                                job._client = self
+                                # Track the original datasite path for cross-datasite operations
+                                job._datasite_path = queue_dir
+                                
+                                logger.debug(f"Found job {job_uid} in datasite {datasite_dir.name}")
+                                return job
+                
+        except Exception as e:
+            logger.warning(f"Error searching for job {job_uid} across datasites: {e}")
+        
+        return None
     
     def list_my_jobs(self, limit: int = 50) -> list[CodeJob]:
         """List jobs submitted by me."""
@@ -414,23 +670,34 @@ class CodeQueueClient:
         Returns:
             bool: True if approved successfully
         """
+        logger.debug(f"Attempting to approve job {job_uid}")
+        
         job = self.get_job(job_uid)
         if not job:
+            logger.warning(f"Job {job_uid} not found")
             return False
 
+        logger.debug(f"Found job {job_uid}: target={job.target_email}, current_user={self.email}")
+        
         if job.target_email != self.email:
-            logger.warning(f"Cannot approve job {job_uid} - not the target owner")
+            logger.warning(f"Cannot approve job {job_uid} - not the target owner (target={job.target_email}, current={self.email})")
             return False
 
         if job.status != JobStatus.pending:
             logger.warning(f"Cannot approve job {job_uid} with status {job.status}")
             return False
 
-        job.update_status(JobStatus.approved)
-        self._save_job(job)
-
-        logger.info(f"Approved job: {job.name}")
-        return True
+        logger.debug(f"Updating job {job_uid} status from {job.status} to approved")
+        
+        try:
+            job.update_status(JobStatus.approved)
+            logger.debug(f"Saving job {job_uid} with new status")
+            self._save_job(job)
+            logger.info(f"Approved job: {job.name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to approve job {job_uid}: {e}")
+            return False
 
     def reject_job(self, job_uid: Union[str, UUID], reason: Optional[str] = None) -> bool:
         """
@@ -592,6 +859,71 @@ class CodeQueueClient:
                 structure["directories"].append(relative_path)
 
         return structure
+
+    def _setup_job_permissions(self, job: CodeJob):
+        """Set up permissions for cross-datasite job approval."""
+        try:
+            target_email = job.target_email
+            requester_email = job.requester_email
+            
+            if target_email and target_email != requester_email:
+                # Create syft.pub.yaml for the specific job directory
+                job_dir = self._get_job_dir(job)
+                syft_pub_path = job_dir / "syft.pub.yaml"
+                
+                # Create permission rules that allow target user to approve/reject
+                permission_content = {
+                    "rules": [
+                        {
+                            "pattern": "**",  # All files in this job directory
+                            "access": {
+                                "read": [requester_email, target_email],
+                                "write": [target_email],  # Target can approve/reject
+                                "admin": [requester_email]  # Requester keeps admin rights
+                            }
+                        }
+                    ]
+                }
+                
+                # Write the syft.pub.yaml file
+                import yaml
+                with open(syft_pub_path, "w") as f:
+                    yaml.dump(permission_content, f, default_flow_style=False, sort_keys=False, indent=2)
+                
+                logger.info(f"Created syft.pub.yaml for job {job.uid} - {target_email} can now approve/reject")
+                
+                # Also create permissions for the status directories if they don't exist
+                queue_dir = self._get_queue_dir()
+                for status in JobStatus:
+                    status_dir = queue_dir / status.value
+                    status_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    status_syft_pub = status_dir / "syft.pub.yaml"
+                    if not status_syft_pub.exists():
+                        # Create permissive rules for status directories
+                        status_permission_content = {
+                            "rules": [
+                                {
+                                    "pattern": "**",
+                                    "access": {
+                                        "read": ["*"],  # Anyone can read job listings
+                                        "write": ["*"], # Anyone can move jobs between statuses
+                                        "admin": [requester_email]
+                                    }
+                                }
+                            ]
+                        }
+                        
+                        with open(status_syft_pub, "w") as f:
+                            yaml.dump(status_permission_content, f, default_flow_style=False, sort_keys=False, indent=2)
+                        
+                        logger.debug(f"Created syft.pub.yaml for status directory: {status.value}")
+                
+        except Exception as e:
+            logger.warning(f"Could not set up job permissions: {e}")
+            # Don't fail job submission if permission setup fails
+            import traceback
+            logger.debug(f"Permission setup error details: {traceback.format_exc()}")
 
 
 def create_client(target_email: str = None, **config_kwargs) -> CodeQueueClient:

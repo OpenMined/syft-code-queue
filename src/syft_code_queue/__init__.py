@@ -224,13 +224,10 @@ class UnifiedAPI:
         if self.client is None:
             return JobCollection([])
         
-        # Search across all datasites for jobs where I am the target_email and status is pending
-        jobs = self.client.list_jobs(
-            target_email=self.email,
-            status=JobStatus.pending,
-            search_all_datasites=True
-        )
-        return self._connect_jobs_apis(jobs)
+        # Use the same approach as jobs_for_me but filter by pending status
+        jobs = self.list_jobs()
+        pending_jobs = [j for j in jobs if j.target_email == self.email and j.status == JobStatus.pending]
+        return self._connect_jobs_apis(pending_jobs)
     
     @property
     def approved_by_me(self) -> JobCollection:

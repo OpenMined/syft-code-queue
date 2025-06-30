@@ -544,7 +544,7 @@ def __getattr__(name):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
-__version__ = "0.1.5"
+__version__ = "0.1.8"
 __all__ = [
     # Global unified API
     "jobs",

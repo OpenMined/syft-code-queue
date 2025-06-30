@@ -1159,14 +1159,14 @@ class JobCollection(list[CodeJob]):
             if can_approve_job:
                 # Jobs I can approve (submitted TO me)
                 actions_html = f"""
-                    <button class="syft-action-btn approve" onclick="approveJob({i}, '{collection_name}')">✓</button>
-                    <button class="syft-action-btn reject" onclick="rejectJob({i}, '{collection_name}')">✗</button>
-                    <button class="syft-action-btn" onclick="reviewJob({i}, '{collection_name}')">👁️</button>
+                    <button class="syft-action-btn approve" onclick="approveJobByUid('{job.uid}')">✓</button>
+                    <button class="syft-action-btn reject" onclick="rejectJobByUid('{job.uid}')">✗</button>
+                    <button class="syft-action-btn" onclick="reviewJobByUid('{job.uid}')">👁️</button>
                 """
             elif job.status == JobStatus.pending and job._client is not None:
                 # Jobs I submitted to others (pending their approval) - only review
                 actions_html = f"""
-                    <button class="syft-action-btn" onclick="reviewJob({i}, '{collection_name}')">👁️</button>
+                    <button class="syft-action-btn" onclick="reviewJobByUid('{job.uid}')">👁️</button>
                 """
             elif (
                 job.status in (JobStatus.running, JobStatus.completed, JobStatus.failed)
@@ -1174,13 +1174,13 @@ class JobCollection(list[CodeJob]):
             ):
                 # Completed/running jobs - logs and output
                 actions_html = f"""
-                    <button class="syft-action-btn" onclick="viewLogs({i}, '{collection_name}')">📜</button>
-                    <button class="syft-action-btn" onclick="viewOutput({i}, '{collection_name}')">📁</button>
+                    <button class="syft-action-btn" onclick="viewLogsByUid('{job.uid}')">📜</button>
+                    <button class="syft-action-btn" onclick="viewOutputByUid('{job.uid}')">📁</button>
                 """
 
             html_content += f"""
                         <tr data-status="{job.status.value}" data-name="{html.escape(job.name.lower())}"
-                            data-email="{html.escape(job.requester_email.lower())}" data-index="{i}">
+                            data-email="{html.escape(job.requester_email.lower())}" data-index="{i}" data-job-uid="{job.uid}">
                             <td>
                                 <input type="checkbox" class="syft-checkbox" onchange="updateSelection('{container_id}')">
                             </td>
@@ -1282,30 +1282,30 @@ class JobCollection(list[CodeJob]):
         }}
 
                  function batchApprove(containerId) {{
-             // Get selected job indices
+             // Get selected job UIDs
              const table = document.querySelector(`#${{containerId}} .syft-jobs-table tbody`);
              const rows = table.querySelectorAll('tr');
-             const selectedIndices = [];
+             const selectedUids = [];
              
              rows.forEach((row, index) => {{
                  const checkbox = row.querySelector('input[type="checkbox"]');
                  if (checkbox && checkbox.checked && row.style.display !== 'none') {{
-                     selectedIndices.push(index);
+                     const jobUid = row.getAttribute('data-job-uid'); if (jobUid) {{ selectedUids.push(jobUid); }}
                  }}
              }});
              
-             if (selectedIndices.length === 0) {{
+             if (selectedUids.length === 0) {{
                  alert('Please select jobs to approve first.');
                  return;
              }}
              
-             const reason = prompt(`Approval reason for ${{selectedIndices.length}} selected job(s):`, "Batch approved via Jupyter interface");
+             const reason = prompt(`Approval reason for ${{selectedUids.length}} selected job(s):`, "Batch approved via Jupyter interface");
              if (reason !== null) {{
                  let code = 'import syft_code_queue as q\\n';
                  code += 'approved_count = 0\\n';
-                 selectedIndices.forEach(index => {{
-                     code += `if len(q.pending_for_me) > ${{index}}:\\n`;
-                     code += `    if q.pending_for_me[${{index}}].approve("${{reason.replace(/"/g, '\\"')}}"):  \\n`;
+                 selectedUids.forEach(uid => {{
+                     code += `job = q.get_job("${{uid}}")\n`;
+                     code += `if job and job.approve("${{reason.replace(/"/g, '\"')}}"):  \n`;
                      code += `        approved_count += 1\\n`;
                  }});
                  code += 'print(f"✅ Approved {{approved_count}} job(s)")';
@@ -1329,30 +1329,30 @@ class JobCollection(list[CodeJob]):
          }}
 
                  function batchReject(containerId) {{
-             // Get selected job indices
+             // Get selected job UIDs
              const table = document.querySelector(`#${{containerId}} .syft-jobs-table tbody`);
              const rows = table.querySelectorAll('tr');
-             const selectedIndices = [];
+             const selectedUids = [];
              
              rows.forEach((row, index) => {{
                  const checkbox = row.querySelector('input[type="checkbox"]');
                  if (checkbox && checkbox.checked && row.style.display !== 'none') {{
-                     selectedIndices.push(index);
+                     const jobUid = row.getAttribute('data-job-uid'); if (jobUid) {{ selectedUids.push(jobUid); }}
                  }}
              }});
              
-             if (selectedIndices.length === 0) {{
+             if (selectedUids.length === 0) {{
                  alert('Please select jobs to reject first.');
                  return;
              }}
              
-             const reason = prompt(`Rejection reason for ${{selectedIndices.length}} selected job(s):`, "Batch rejected via Jupyter interface");
+             const reason = prompt(`Rejection reason for ${{selectedUids.length}} selected job(s):`, "Batch rejected via Jupyter interface");
              if (reason !== null && reason.trim() !== "") {{
                  let code = 'import syft_code_queue as q\\n';
                  code += 'rejected_count = 0\\n';
-                 selectedIndices.forEach(index => {{
-                     code += `if len(q.pending_for_me) > ${{index}}:\\n`;
-                     code += `    if q.pending_for_me[${{index}}].reject("${{reason.replace(/"/g, '\\"')}}"):  \\n`;
+                 selectedUids.forEach(uid => {{
+                     code += `job = q.get_job("${{uid}}")\n`;
+                     code += `if job and job.reject("${{reason.replace(/"/g, '\"')}}"):  \n`;
                      code += `        rejected_count += 1\\n`;
                  }});
                  code += 'print(f"🚫 Rejected {{rejected_count}} job(s)")';
@@ -1483,6 +1483,113 @@ class JobCollection(list[CodeJob]):
                 alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
             }});
         }};
+
+        // UID-based functions for individual row buttons
+        window.approveJobByUid = function(jobUid) {
+            var reason = prompt("Approval reason (optional):", "Approved via Jupyter interface");
+            if (reason !== null) {
+                var code = `q.get_job("${jobUid}").approve("${reason.replace(/"/g, '\\"')}")`;
+
+                navigator.clipboard.writeText(code).then(() => {
+                    var buttons = document.querySelectorAll(`button[onclick="approveJobByUid('${jobUid}')"]`);
+                    buttons.forEach(button => {
+                        var originalText = button.innerHTML;
+                        button.innerHTML = '✅ Copied!';
+                        button.style.backgroundColor = '#059669';
+                        setTimeout(() => {
+                            button.innerHTML = originalText;
+                            button.style.backgroundColor = '';
+                        }, 2000);
+                    });
+                }).catch(err => {
+                    console.error('Could not copy code to clipboard:', err);
+                    alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
+                });
+            }
+        };
+
+        window.rejectJobByUid = function(jobUid) {
+            var reason = prompt("Rejection reason:", "");
+            if (reason !== null && reason.trim() !== "") {
+                var code = `q.get_job("${jobUid}").reject("${reason.replace(/"/g, '\\"')}")`;
+
+                navigator.clipboard.writeText(code).then(() => {
+                    var buttons = document.querySelectorAll(`button[onclick="rejectJobByUid('${jobUid}')"]`);
+                    buttons.forEach(button => {
+                        var originalText = button.innerHTML;
+                        button.innerHTML = '🚫 Copied!';
+                        button.style.backgroundColor = '#dc2626';
+                        setTimeout(() => {
+                            button.innerHTML = originalText;
+                            button.style.backgroundColor = '';
+                        }, 2000);
+                    });
+                }).catch(err => {
+                    console.error('Could not copy code to clipboard:', err);
+                    alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
+                });
+            }
+        };
+
+        window.reviewJobByUid = function(jobUid) {
+            var code = `q.get_job("${jobUid}").review()`;
+
+            navigator.clipboard.writeText(code).then(() => {
+                var buttons = document.querySelectorAll(`button[onclick="reviewJobByUid('${jobUid}')"]`);
+                buttons.forEach(button => {
+                    var originalText = button.innerHTML;
+                    button.innerHTML = '📋 Copied!';
+                    button.style.backgroundColor = '#059669';
+                    setTimeout(() => {
+                        button.innerHTML = originalText;
+                        button.style.backgroundColor = '';
+                    }, 2000);
+                });
+            }).catch(err => {
+                console.error('Could not copy code to clipboard:', err);
+                alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
+            });
+        };
+
+        window.viewLogsByUid = function(jobUid) {
+            var code = `q.get_job("${jobUid}").get_logs()`;
+
+            navigator.clipboard.writeText(code).then(() => {
+                var buttons = document.querySelectorAll(`button[onclick="viewLogsByUid('${jobUid}')"]`);
+                buttons.forEach(button => {
+                    var originalText = button.innerHTML;
+                    button.innerHTML = '📜 Copied!';
+                    button.style.backgroundColor = '#6366f1';
+                    setTimeout(() => {
+                        button.innerHTML = originalText;
+                        button.style.backgroundColor = '';
+                    }, 2000);
+                });
+            }).catch(err => {
+                console.error('Could not copy code to clipboard:', err);
+                alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
+            });
+        };
+
+        window.viewOutputByUid = function(jobUid) {
+            var code = `q.get_job("${jobUid}").get_output()`;
+
+            navigator.clipboard.writeText(code).then(() => {
+                var buttons = document.querySelectorAll(`button[onclick="viewOutputByUid('${jobUid}')"]`);
+                buttons.forEach(button => {
+                    var originalText = button.innerHTML;
+                    button.innerHTML = '📁 Copied!';
+                    button.style.backgroundColor = '#8b5cf6';
+                    setTimeout(() => {
+                        button.innerHTML = originalText;
+                        button.style.backgroundColor = '';
+                    }, 2000);
+                });
+            }).catch(err => {
+                console.error('Could not copy code to clipboard:', err);
+                alert('Failed to copy to clipboard. Please copy manually:\\n\\n' + code);
+            });
+        };
         </script>
         """
 

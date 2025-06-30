@@ -33,15 +33,15 @@ def main():
         print(f"   From: {job.requester_email}")
         print(f"   Status: {job.status}")
         
-        # Check if this job has proper permissions
+        # Check if this job has proper permissions (syft-perm creates these automatically)
         if hasattr(job, '_datasite_path') and job._datasite_path is not None:
             job_dir = job._datasite_path / "pending" / str(job.uid)
             syft_pub_path = job_dir / "syft.pub.yaml"
             
             if syft_pub_path.exists():
-                print(f"   ✅ Has syft.pub.yaml permissions")
+                print(f"   ✅ Has syft.pub.yaml permissions (syft-perm managed)")
             else:
-                print(f"   ❌ Missing syft.pub.yaml (old job - needs resubmission)")
+                print(f"   ❌ Missing syft.pub.yaml (old job - needs resubmission with new version)")
         print()
     
     # Optionally approve the first job

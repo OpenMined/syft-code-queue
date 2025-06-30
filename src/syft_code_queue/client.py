@@ -494,8 +494,8 @@ class CodeQueueClient:
         # Save job to local queue
         self._save_job(job)
         
-        # Set up permissions for cross-datasite job approval
-        self._setup_job_permissions(job)
+        # Set permissions using syft-perm so recipient can access the job
+        self._set_job_permissions(job)
         
         logger.info(f"Submitted job '{name}' to {target_email}")
         return job
@@ -665,21 +665,23 @@ class CodeQueueClient:
         job.code_folder = code_dir  # Update to queue location
 
     def _set_job_permissions(self, job: CodeJob):
-        """Set proper permissions for job files so the recipient can see them."""
+        """Set proper permissions for job files so the recipient can see and approve them."""
         try:
             job_dir = self._get_job_dir(job)
             
             # Set permissions for the metadata.json file
+            # Target user needs write access to approve/reject (change status)
             metadata_file = job_dir / "metadata.json"
             if metadata_file.exists():
                 set_file_permissions(
                     str(metadata_file),
                     read_users=[job.target_email, job.requester_email],
-                    write_users=[job.requester_email]  # Only requester can modify job metadata
+                    write_users=[job.target_email, job.requester_email],  # Both can modify for approval/updates
+                    admin_users=[job.requester_email]  # Requester has admin rights
                 )
                 logger.debug(f"Set permissions for metadata file: {metadata_file}")
 
-            # Set permissions for the entire code directory
+            # Set permissions for the entire code directory (read-only for target)
             code_dir = job_dir / "code"
             if code_dir.exists():
                 # Set permissions for all files in the code directory
@@ -688,11 +690,20 @@ class CodeQueueClient:
                         set_file_permissions(
                             str(file_path),
                             read_users=[job.target_email, job.requester_email],
-                            write_users=[job.requester_email]  # Only requester can modify code
+                            write_users=[job.requester_email],  # Only requester can modify code
+                            admin_users=[job.requester_email]
                         )
                         logger.debug(f"Set permissions for code file: {file_path}")
 
-            logger.info(f"Successfully set permissions for job {job.uid} - recipient {job.target_email} can now access the job")
+            # Set directory-level permissions to allow job status changes
+            set_file_permissions(
+                str(job_dir),
+                read_users=[job.target_email, job.requester_email],
+                write_users=[job.target_email, job.requester_email],  # Both can modify directory for job moves
+                admin_users=[job.requester_email]
+            )
+
+            logger.info(f"Successfully set permissions for job {job.uid} - {job.target_email} can now access and approve/reject the job")
 
         except Exception as e:
             logger.warning(f"Failed to set permissions for job {job.uid}: {e}")
@@ -899,71 +910,6 @@ class CodeQueueClient:
                 structure["directories"].append(relative_path)
 
         return structure
-
-    def _setup_job_permissions(self, job: CodeJob):
-        """Set up permissions for cross-datasite job approval."""
-        try:
-            target_email = job.target_email
-            requester_email = job.requester_email
-            
-            if target_email and target_email != requester_email:
-                # Create syft.pub.yaml for the specific job directory
-                job_dir = self._get_job_dir(job)
-                syft_pub_path = job_dir / "syft.pub.yaml"
-                
-                # Create permission rules that allow target user to approve/reject
-                permission_content = {
-                    "rules": [
-                        {
-                            "pattern": "**",  # All files in this job directory
-                            "access": {
-                                "read": [requester_email, target_email],
-                                "write": [target_email],  # Target can approve/reject
-                                "admin": [requester_email]  # Requester keeps admin rights
-                            }
-                        }
-                    ]
-                }
-                
-                # Write the syft.pub.yaml file
-                import yaml
-                with open(syft_pub_path, "w") as f:
-                    yaml.dump(permission_content, f, default_flow_style=False, sort_keys=False, indent=2)
-                
-                logger.info(f"Created syft.pub.yaml for job {job.uid} - {target_email} can now approve/reject")
-                
-                # Also create permissions for the status directories if they don't exist
-                queue_dir = self._get_queue_dir()
-                for status in JobStatus:
-                    status_dir = queue_dir / status.value
-                    status_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    status_syft_pub = status_dir / "syft.pub.yaml"
-                    if not status_syft_pub.exists():
-                        # Create permissive rules for status directories
-                        status_permission_content = {
-                            "rules": [
-                                {
-                                    "pattern": "**",
-                                    "access": {
-                                        "read": ["*"],  # Anyone can read job listings
-                                        "write": ["*"], # Anyone can move jobs between statuses
-                                        "admin": [requester_email]
-                                    }
-                                }
-                            ]
-                        }
-                        
-                        with open(status_syft_pub, "w") as f:
-                            yaml.dump(status_permission_content, f, default_flow_style=False, sort_keys=False, indent=2)
-                        
-                        logger.debug(f"Created syft.pub.yaml for status directory: {status.value}")
-                
-        except Exception as e:
-            logger.warning(f"Could not set up job permissions: {e}")
-            # Don't fail job submission if permission setup fails
-            import traceback
-            logger.debug(f"Permission setup error details: {traceback.format_exc()}")
 
 
 def create_client(target_email: str = None, **config_kwargs) -> CodeQueueClient:

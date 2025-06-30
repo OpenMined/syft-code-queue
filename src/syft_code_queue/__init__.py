@@ -42,12 +42,14 @@ try:
     from syft_core import Client as SyftBoxClient
 except ImportError:
     logger.warning("syft_core not available - using mock client")
+
     class MockSyftBoxClient:
         def __init__(self):
             self.email = "demo@example.com"
 
         def app_data(self, app_name):
             import tempfile
+
             return Path(tempfile.gettempdir()) / f"syftbox_demo_{app_name}"
 
         @classmethod
@@ -97,10 +99,12 @@ class UnifiedAPI:
         connected_jobs = [self._connect_job_apis(job) for job in jobs]
         return JobCollection(connected_jobs)
 
-    def list_jobs(self,
-                  status: Optional[JobStatus] = None,
-                  target_email: Optional[str] = None,
-                  limit: int = 50) -> list[CodeJob]:
+    def list_jobs(
+        self,
+        status: Optional[JobStatus] = None,
+        target_email: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[CodeJob]:
         """
         List jobs matching the given criteria.
 
@@ -170,12 +174,14 @@ class UnifiedAPI:
 
     # Job Submission (Data Scientist functionality)
 
-    def submit_job(self,
-                   target_email: str,
-                   code_folder: Union[str, Path],
-                   name: str,
-                   description: Optional[str] = None,
-                   tags: Optional[list[str]] = None) -> CodeJob:
+    def submit_job(
+        self,
+        target_email: str,
+        code_folder: Union[str, Path],
+        name: str,
+        description: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+    ) -> CodeJob:
         """
         Submit a code package for execution on a remote datasite.
 
@@ -194,13 +200,15 @@ class UnifiedAPI:
         job = self.client.submit_job(target_email, code_folder, name, description, tags)
         return self._connect_job_apis(job)
 
-    def submit_python(self,
-                     target_email: str,
-                     script_content: str,
-                     name: str,
-                     description: Optional[str] = None,
-                     requirements: Optional[list[str]] = None,
-                     tags: Optional[list[str]] = None) -> CodeJob:
+    def submit_python(
+        self,
+        target_email: str,
+        script_content: str,
+        name: str,
+        description: Optional[str] = None,
+        requirements: Optional[list[str]] = None,
+        tags: Optional[list[str]] = None,
+    ) -> CodeJob:
         """
         Create and submit a Python job from script content.
 
@@ -217,15 +225,19 @@ class UnifiedAPI:
         """
         if self.client is None:
             raise RuntimeError("API not properly initialized")
-        job = self.client.create_python_job(target_email, script_content, name, description, requirements, tags)
+        job = self.client.create_python_job(
+            target_email, script_content, name, description, requirements, tags
+        )
         return self._connect_job_apis(job)
 
-    def submit_bash(self,
-                   target_email: str,
-                   script_content: str,
-                   name: str,
-                   description: Optional[str] = None,
-                   tags: Optional[list[str]] = None) -> CodeJob:
+    def submit_bash(
+        self,
+        target_email: str,
+        script_content: str,
+        name: str,
+        description: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+    ) -> CodeJob:
         """
         Create and submit a bash job from script content.
 
@@ -323,7 +335,7 @@ class UnifiedAPI:
             "jobs_submitted_by_me": len(self.jobs_for_others),
             "jobs_submitted_to_me": len(self.jobs_for_me),
             "pending_for_approval": len(self.pending_for_me),
-            "my_running_jobs": len(self.my_running)
+            "my_running_jobs": len(self.my_running),
         }
         return summary
 
@@ -416,31 +428,32 @@ review_job = jobs.review_job
 status = jobs.status
 help = jobs.help
 
+
 # Override module attribute access to provide fresh data from backend
 def __getattr__(name):
     """Module-level attribute access that always fetches fresh data."""
-    if name == 'jobs_for_others':
+    if name == "jobs_for_others":
         return jobs.jobs_for_others
-    elif name == 'jobs_for_me':
+    elif name == "jobs_for_me":
         return jobs.jobs_for_me
-    elif name == 'pending_for_me':
+    elif name == "pending_for_me":
         return jobs.pending_for_me
-    elif name == 'my_pending':
+    elif name == "my_pending":
         return jobs.my_pending
-    elif name == 'my_running':
+    elif name == "my_running":
         return jobs.my_running
-    elif name == 'my_completed':
+    elif name == "my_completed":
         return jobs.my_completed
-    elif name == 'approved_by_me':
+    elif name == "approved_by_me":
         return jobs.approved_by_me
     else:
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 
 __version__ = "0.1.1"
 __all__ = [
     # Global unified API
     "jobs",
-
     # Object-oriented properties
     "jobs_for_others",
     "jobs_for_me",
@@ -449,7 +462,6 @@ __all__ = [
     "my_running",
     "my_completed",
     "approved_by_me",
-
     # Convenience functions
     "submit_job",
     "submit_python",
@@ -465,17 +477,16 @@ __all__ = [
     "review_job",
     "status",
     "help",
-
     # Lower-level APIs
     "CodeQueueClient",
     "create_client",
-
     # Models
     "CodeJob",
     "JobStatus",
     "QueueConfig",
     "JobCollection",
 ]
+
 
 # Legacy convenience function for backward compatibility
 def submit_code(target_email: str, code_folder, name: str, **kwargs) -> CodeJob:

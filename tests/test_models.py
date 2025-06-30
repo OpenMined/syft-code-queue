@@ -24,7 +24,7 @@ def test_code_job_creation():
         target_email="target@example.com",
         code_folder=Path("/tmp/test"),
         description="Test description",
-        tags=["test", "demo"]
+        tags=["test", "demo"],
     )
 
     assert job.name == "Test Job"
@@ -42,7 +42,7 @@ def test_job_status_updates():
         name="Test Job",
         requester_email="requester@example.com",
         target_email="target@example.com",
-        code_folder=Path("/tmp/test")
+        code_folder=Path("/tmp/test"),
     )
 
     original_updated_at = job.updated_at
@@ -70,7 +70,7 @@ def test_job_terminal_status():
         name="Test Job",
         requester_email="requester@example.com",
         target_email="target@example.com",
-        code_folder=Path("/tmp/test")
+        code_folder=Path("/tmp/test"),
     )
 
     # Non-terminal states
@@ -100,7 +100,7 @@ def test_job_duration():
         name="Test Job",
         requester_email="requester@example.com",
         target_email="target@example.com",
-        code_folder=Path("/tmp/test")
+        code_folder=Path("/tmp/test"),
     )
 
     # No duration without timestamps
@@ -132,7 +132,7 @@ def test_job_serialization():
         target_email="target@example.com",
         code_folder=Path("/tmp/test"),
         description="Test description",
-        tags=["test", "demo"]
+        tags=["test", "demo"],
     )
 
     # Serialize

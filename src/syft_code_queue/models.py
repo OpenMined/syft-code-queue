@@ -14,12 +14,13 @@ if TYPE_CHECKING:
 
 class JobStatus(str, enum.Enum):
     """Status of a code execution job."""
-    pending = "pending"          # Waiting for approval
-    approved = "approved"        # Approved, waiting to run
-    running = "running"          # Currently executing
-    completed = "completed"      # Finished successfully
-    failed = "failed"           # Execution failed
-    rejected = "rejected"       # Rejected by data owner
+
+    pending = "pending"  # Waiting for approval
+    approved = "approved"  # Approved, waiting to run
+    running = "running"  # Currently executing
+    completed = "completed"  # Finished successfully
+    failed = "failed"  # Execution failed
+    rejected = "rejected"  # Rejected by data owner
 
 
 class CodeJob(BaseModel):
@@ -152,7 +153,7 @@ class CodeJob(BaseModel):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "tags": self.tags,
             "code_files": [str(f.name) for f in code_files],
-            "code_folder": str(self.code_folder)
+            "code_folder": str(self.code_folder),
         }
 
     def get_output(self) -> Optional[Path]:
@@ -202,13 +203,13 @@ class CodeJob(BaseModel):
             tags_html = '<div class="syft-tags">\n'
             for tag in self.tags:
                 tags_html += f'            <span class="syft-tag">{html.escape(tag)}</span> '
-            tags_html += '\n        </div>\n        '
+            tags_html += "\n        </div>\n        "
 
         # Action buttons based on status and available APIs
         actions_html = ""
         if self.status == JobStatus.pending:
             if self._client is not None:  # This is a job for me to approve
-                actions_html = f'''
+                actions_html = f"""
         <div class="syft-actions">
             <div class="syft-meta">
                 Created {time_display}
@@ -225,18 +226,18 @@ class CodeJob(BaseModel):
                 </button>
             </div>
         </div>
-        '''
+        """
             else:  # This is my job submitted to others
-                actions_html = f'''
+                actions_html = f"""
         <div class="syft-actions">
             <div class="syft-meta">
                 Created {time_display} • Awaiting approval
             </div>
         </div>
-        '''
+        """
         elif self.status in (JobStatus.running, JobStatus.completed, JobStatus.failed):
             if self._client is not None:  # This is my job, can see logs/output
-                actions_html = f'''
+                actions_html = f"""
         <div class="syft-actions">
             <div class="syft-meta">
                 Created {time_display}
@@ -250,25 +251,25 @@ class CodeJob(BaseModel):
                 </button>
             </div>
         </div>
-        '''
+        """
             else:
-                actions_html = f'''
+                actions_html = f"""
         <div class="syft-actions">
             <div class="syft-meta">
                 Created {time_display}
             </div>
         </div>
-        '''
+        """
         else:  # rejected or other states
-            actions_html = f'''
+            actions_html = f"""
         <div class="syft-actions">
             <div class="syft-meta">
                 Created {time_display}
             </div>
         </div>
-        '''
+        """
 
-        return f'''
+        return f"""
     <div class="syft-job-container">
 
     <style>
@@ -750,7 +751,7 @@ else:
     </script>
 
     </div>
-    '''
+    """
 
     def __repr__(self) -> str:
         return f"CodeJob(name='{self.name}', status='{self.status}', id='{self.short_id}')"
@@ -803,7 +804,9 @@ class JobCollection(list[CodeJob]):
                 # Check if job is still pending before attempting to approve
                 if job.status != JobStatus.pending:
                     results["skipped"] += 1
-                    results["errors"].append(f"Job {job.short_id} ({job.name}): Already {job.status.value}, skipping")
+                    results["errors"].append(
+                        f"Job {job.short_id} ({job.name}): Already {job.status.value}, skipping"
+                    )
                     continue
 
                 if job.approve(reason):
@@ -824,7 +827,9 @@ class JobCollection(list[CodeJob]):
                 # Check if job is still pending before attempting to reject
                 if job.status != JobStatus.pending:
                     results["skipped"] += 1
-                    results["errors"].append(f"Job {job.short_id} ({job.name}): Already {job.status.value}, skipping")
+                    results["errors"].append(
+                        f"Job {job.short_id} ({job.name}): Already {job.status.value}, skipping"
+                    )
                     continue
 
                 if job.reject(reason):
@@ -846,7 +851,7 @@ class JobCollection(list[CodeJob]):
         return {
             "total": len(self),
             "by_status": status_counts,
-            "latest": self[-1] if self else None
+            "latest": self[-1] if self else None,
         }
 
     def refresh(self) -> "JobCollection":
@@ -1163,9 +1168,9 @@ class JobCollection(list[CodeJob]):
                 <input type="text" class="syft-search-box" placeholder="🔍 Search jobs..."
                        onkeyup="filterJobs('{container_id}')">
                 <button class="syft-filter-btn active" onclick="filterByStatus('{container_id}', 'all')">All</button>
-                <button class="syft-filter-btn" onclick="filterByStatus('{container_id}', 'pending')">Pending ({summary['by_status'].get('pending', 0)})</button>
-                <button class="syft-filter-btn" onclick="filterByStatus('{container_id}', 'running')">Running ({summary['by_status'].get('running', 0)})</button>
-                <button class="syft-filter-btn" onclick="filterByStatus('{container_id}', 'completed')">Completed ({summary['by_status'].get('completed', 0)})</button>
+                <button class="syft-filter-btn" onclick="filterByStatus('{container_id}', 'pending')">Pending ({summary["by_status"].get("pending", 0)})</button>
+                <button class="syft-filter-btn" onclick="filterByStatus('{container_id}', 'running')">Running ({summary["by_status"].get("running", 0)})</button>
+                <button class="syft-filter-btn" onclick="filterByStatus('{container_id}', 'completed')">Completed ({summary["by_status"].get("completed", 0)})</button>
         """
 
         # Add batch approval buttons if any jobs can be approved
@@ -1217,10 +1222,14 @@ class JobCollection(list[CodeJob]):
                 for tag in job.tags[:2]:  # Show max 2 tags
                     tags_html += f'<span class="syft-job-tag">{html.escape(tag)}</span>'
                 if len(job.tags) > 2:
-                    tags_html += f'<span class="syft-job-tag">+{len(job.tags)-2}</span>'
+                    tags_html += f'<span class="syft-job-tag">+{len(job.tags) - 2}</span>'
 
             # Build action buttons - pass index and collection type
-            collection_name = "pending_for_me" if (job.status == JobStatus.pending and job._client is not None) else "jobs_for_others"
+            collection_name = (
+                "pending_for_me"
+                if (job.status == JobStatus.pending and job._client is not None)
+                else "jobs_for_others"
+            )
             actions_html = ""
             if job.status == JobStatus.pending and job._client is not None:
                 actions_html = f"""
@@ -1228,7 +1237,10 @@ class JobCollection(list[CodeJob]):
                     <button class="syft-action-btn reject" onclick="rejectJob({i}, '{collection_name}')">✗</button>
                     <button class="syft-action-btn" onclick="reviewJob({i}, '{collection_name}')">👁️</button>
                 """
-            elif job.status in (JobStatus.running, JobStatus.completed, JobStatus.failed) and job._client is not None:
+            elif (
+                job.status in (JobStatus.running, JobStatus.completed, JobStatus.failed)
+                and job._client is not None
+            ):
                 actions_html = f"""
                     <button class="syft-action-btn" onclick="viewLogs({i}, '{collection_name}')">📜</button>
                     <button class="syft-action-btn" onclick="viewOutput({i}, '{collection_name}')">📁</button>
@@ -1242,7 +1254,7 @@ class JobCollection(list[CodeJob]):
                             </td>
                             <td>
                                 <div class="syft-job-name" title="{html.escape(job.name)}">{html.escape(job.name)}</div>
-                                <div class="syft-job-desc" title="{html.escape(job.description or '')}">{html.escape(job.description or 'No description')}</div>
+                                <div class="syft-job-desc" title="{html.escape(job.description or "")}">{html.escape(job.description or "No description")}</div>
                                 <div style="font-size: 11px; color: #9ca3af; margin-top: 2px;">{time_display}</div>
                             </td>
                             <td>
@@ -1505,6 +1517,7 @@ class JobCollection(list[CodeJob]):
 
 class JobCreate(BaseModel):
     """Request to create a new code job."""
+
     name: str
     target_email: str
     code_folder: Path
@@ -1514,6 +1527,7 @@ class JobCreate(BaseModel):
 
 class JobUpdate(BaseModel):
     """Request to update a job."""
+
     uid: UUID
     status: Optional[JobStatus] = None
     error_message: Optional[str] = None
@@ -1522,6 +1536,7 @@ class JobUpdate(BaseModel):
 
 class QueueConfig(BaseModel):
     """Configuration for the code queue."""
+
     queue_name: str = "code-queue"
     max_concurrent_jobs: int = 3
     job_timeout: int = 300  # 5 minutes default

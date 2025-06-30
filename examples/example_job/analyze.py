@@ -15,10 +15,12 @@ def main():
 
     # Simulate loading data from the datasite
     np.random.seed(42)
-    data = pd.DataFrame({
-        'values': np.random.normal(50, 15, 1000),
-        'category': np.random.choice(['A', 'B', 'C'], 1000)
-    })
+    data = pd.DataFrame(
+        {
+            "values": np.random.normal(50, 15, 1000),
+            "category": np.random.choice(["A", "B", "C"], 1000),
+        }
+    )
 
     print(f"📊 Loaded {len(data)} records")
 
@@ -26,23 +28,24 @@ def main():
     results = {
         "total_records": len(data),
         "category_stats": {
-            "counts": data['category'].value_counts().to_dict(),
-            "mean_by_category": data.groupby('category')['values'].mean().to_dict()
+            "counts": data["category"].value_counts().to_dict(),
+            "mean_by_category": data.groupby("category")["values"].mean().to_dict(),
         },
         "overall_stats": {
-            "mean": float(data['values'].mean()),
-            "std": float(data['values'].std()),
-            "median": float(data['values'].median())
-        }
+            "mean": float(data["values"].mean()),
+            "std": float(data["values"].std()),
+            "median": float(data["values"].median()),
+        },
     }
 
     # Save results
-    with open("analysis_results.json", 'w') as f:
+    with open("analysis_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
     print("�� Analysis Results:")
     print(json.dumps(results, indent=2))
     print("✅ Analysis complete!")
+
 
 if __name__ == "__main__":
     main()

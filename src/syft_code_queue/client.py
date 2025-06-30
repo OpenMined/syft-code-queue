@@ -21,6 +21,7 @@ except ImportError:
         def app_data(self, app_name):
             import tempfile
             from pathlib import Path
+
             return Path(tempfile.gettempdir()) / f"syftbox_demo_{app_name}"
 
         @classmethod
@@ -96,7 +97,8 @@ class CodeQueueClient:
         # Save metadata file inside job directory
         job_file = job_dir / "metadata.json"
 
-        with open(job_file, 'w') as f:
+        with open(job_file, "w") as f:
+
             def custom_serializer(obj):
                 if isinstance(obj, Path):
                     return str(obj)
@@ -108,10 +110,12 @@ class CodeQueueClient:
 
             json.dump(job.model_dump(), f, indent=2, default=custom_serializer)
 
-    def list_jobs(self,
-                  target_email: Optional[str] = None,
-                  status: Optional[JobStatus] = None,
-                  limit: int = 50) -> list[CodeJob]:
+    def list_jobs(
+        self,
+        target_email: Optional[str] = None,
+        status: Optional[JobStatus] = None,
+        limit: int = 50,
+    ) -> list[CodeJob]:
         """
         List jobs, optionally filtered.
 
@@ -171,13 +175,15 @@ class CodeQueueClient:
         jobs.sort(key=lambda j: j.created_at, reverse=True)
         return jobs
 
-    def create_python_job(self,
-                         target_email: str,
-                         script_content: str,
-                         name: str,
-                         description: Optional[str] = None,
-                         requirements: Optional[list[str]] = None,
-                         tags: Optional[list[str]] = None) -> CodeJob:
+    def create_python_job(
+        self,
+        target_email: str,
+        script_content: str,
+        name: str,
+        description: Optional[str] = None,
+        requirements: Optional[list[str]] = None,
+        tags: Optional[list[str]] = None,
+    ) -> CodeJob:
         """
         Create and submit a Python job from script content.
 
@@ -218,7 +224,7 @@ class CodeQueueClient:
                 code_folder=temp_dir,
                 name=name,
                 description=description,
-                tags=tags
+                tags=tags,
             )
 
         finally:
@@ -226,12 +232,14 @@ class CodeQueueClient:
             # The temp directory will be cleaned up by the system later
             pass
 
-    def submit_code(self,
-                    target_email: str,
-                    code_folder: Path,
-                    name: str,
-                    description: Optional[str] = None,
-                    tags: Optional[list[str]] = None) -> CodeJob:
+    def submit_code(
+        self,
+        target_email: str,
+        code_folder: Path,
+        name: str,
+        description: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+    ) -> CodeJob:
         """
         Submit code for execution on a remote datasite.
 
@@ -259,13 +267,10 @@ class CodeQueueClient:
             target_email=target_email,
             code_folder=code_folder,
             description=description,
-            tags=tags or []
+            tags=tags or [],
         )
 
-        job = CodeJob(
-            **job_create.model_dump(),
-            requester_email=self.email
-        )
+        job = CodeJob(**job_create.model_dump(), requester_email=self.email)
         job._client = self  # Set the client reference
 
         # Copy code to queue location
@@ -287,13 +292,14 @@ class CodeQueueClient:
             import json
             from datetime import datetime
             from uuid import UUID
+
             data = json.load(f)
 
             # Convert string representations back to proper types
-            if 'uid' in data and isinstance(data['uid'], str):
-                data['uid'] = UUID(data['uid'])
+            if "uid" in data and isinstance(data["uid"], str):
+                data["uid"] = UUID(data["uid"])
 
-            for date_field in ['created_at', 'updated_at', 'started_at', 'completed_at']:
+            for date_field in ["created_at", "updated_at", "started_at", "completed_at"]:
                 if date_field in data and data[date_field] and isinstance(data[date_field], str):
                     data[date_field] = datetime.fromisoformat(data[date_field])
 
@@ -342,6 +348,7 @@ class CodeQueueClient:
             RuntimeError: If the job fails or is rejected
         """
         import time
+
         start_time = time.time()
         poll_interval = 2  # seconds
 

@@ -32,6 +32,19 @@ except ImportError:
 
 from .models import CodeJob, JobCreate, JobStatus, QueueConfig
 
+# Import syft-perm for permission management
+try:
+    from .syft_perm import set_file_permissions
+    SYFT_PERM_AVAILABLE = True
+except ImportError:
+    try:
+        from syft_perm import set_file_permissions
+        SYFT_PERM_AVAILABLE = True
+    except ImportError:
+        logger.warning("syft-perm not available - job permissions will not be set")
+        set_file_permissions = None
+        SYFT_PERM_AVAILABLE = False
+
 
 class CodeQueueClient:
     """Client for interacting with the code queue."""
@@ -279,6 +292,9 @@ class CodeQueueClient:
         # Save job to local queue
         self._save_job(job)
         
+        # Set permissions so the recipient can see the job
+        self._set_job_permissions(job)
+        
         logger.info(f"Submitted job '{name}' to {target_email}")
         return job
     
@@ -402,6 +418,45 @@ class CodeQueueClient:
         
         shutil.copytree(job.code_folder, code_dir)
         job.code_folder = code_dir  # Update to queue location
+
+    def _set_job_permissions(self, job: CodeJob):
+        """Set proper permissions for job files so the recipient can see them."""
+        if not SYFT_PERM_AVAILABLE:
+            logger.debug("syft-perm not available, skipping permission setting")
+            return
+
+        try:
+            job_dir = self._get_job_dir(job)
+            
+            # Set permissions for the metadata.json file
+            metadata_file = job_dir / "metadata.json"
+            if metadata_file.exists():
+                set_file_permissions(
+                    str(metadata_file),
+                    read_users=[job.target_email, job.requester_email],
+                    write_users=[job.requester_email]  # Only requester can modify job metadata
+                )
+                logger.debug(f"Set permissions for metadata file: {metadata_file}")
+
+            # Set permissions for the entire code directory
+            code_dir = job_dir / "code"
+            if code_dir.exists():
+                # Set permissions for all files in the code directory
+                for file_path in code_dir.rglob("*"):
+                    if file_path.is_file():
+                        set_file_permissions(
+                            str(file_path),
+                            read_users=[job.target_email, job.requester_email],
+                            write_users=[job.requester_email]  # Only requester can modify code
+                        )
+                        logger.debug(f"Set permissions for code file: {file_path}")
+
+            logger.info(f"Successfully set permissions for job {job.uid} - recipient {job.target_email} can now access the job")
+
+        except Exception as e:
+            logger.warning(f"Failed to set permissions for job {job.uid}: {e}")
+            # Don't fail the job submission if permissions can't be set
+            pass
     
     def approve_job(self, job_uid: Union[str, UUID], reason: Optional[str] = None) -> bool:
         """

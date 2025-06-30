@@ -36,8 +36,6 @@ from .client import CodeQueueClient, create_client
 from .models import CodeJob, JobStatus, QueueConfig, JobCollection
 # Runner components moved to syft-simple-runner package  
 # App execution moved to syft-simple-runner package
-from .data_owner_api import DataOwnerAPI
-from .data_scientist_api import DataScientistAPI
 
 try:
     from syft_core import Client as SyftBoxClient
@@ -73,8 +71,6 @@ class UnifiedAPI:
             self.syftbox_client = SyftBoxClient.load()
             self.config = config or QueueConfig(queue_name="code-queue")
             self.client = CodeQueueClient(syftbox_client=self.syftbox_client, config=self.config)
-            self._ds_api = DataScientistAPI(config=self.config)
-            self._do_api = DataOwnerAPI(config=self.config)
             
             logger.info(f"Initialized syft-code-queue API for {self.email}")
         except Exception as e:
@@ -83,8 +79,6 @@ class UnifiedAPI:
             self.syftbox_client = SyftBoxClient()
             self.config = config or QueueConfig(queue_name="code-queue")
             self.client = None
-            self._ds_api = None
-            self._do_api = None
     
     @property
     def email(self) -> str:
@@ -93,8 +87,8 @@ class UnifiedAPI:
     
     def _connect_job_apis(self, job: CodeJob) -> CodeJob:
         """Connect a job to the appropriate APIs for method calls."""
-        job._ds_api = self._ds_api
-        job._do_api = self._do_api
+        if self.client is not None:
+            job._client = self.client
         return job
     
     def _connect_jobs_apis(self, jobs: List[CodeJob]) -> JobCollection:
@@ -102,23 +96,44 @@ class UnifiedAPI:
         connected_jobs = [self._connect_job_apis(job) for job in jobs]
         return JobCollection(connected_jobs)
     
+    def list_jobs(self, 
+                  status: Optional[JobStatus] = None,
+                  target_email: Optional[str] = None,
+                  limit: int = 50) -> List[CodeJob]:
+        """
+        List jobs matching the given criteria.
+        
+        Args:
+            status: Optional filter by job status
+            target_email: Optional filter by target datasite
+            limit: Maximum number of jobs to return
+            
+        Returns:
+            List of CodeJob objects matching the criteria
+        """
+        if self.client is None:
+            return []
+            
+        jobs = self.client.list_jobs(target_email=target_email, status=status, limit=limit)
+        return [self._connect_job_apis(job) for job in jobs]
+    
     # Object-Oriented Properties
     
     @property
     def jobs_for_others(self) -> JobCollection:
         """Jobs I've submitted to other people."""
-        if self._ds_api is None:
+        if self.client is None:
             return JobCollection([])
-        jobs = self._ds_api.list_my_jobs(limit=100)
-        return self._connect_jobs_apis(jobs)
+        jobs = self.list_jobs()
+        return self._connect_jobs_apis([j for j in jobs if j.requester_email == self.email])
     
     @property
     def jobs_for_me(self) -> JobCollection:
         """Jobs submitted to me for approval/management."""
-        if self._do_api is None:
+        if self.client is None:
             return JobCollection([])
-        jobs = self._do_api.list_all_jobs(limit=100)
-        return self._connect_jobs_apis(jobs)
+        jobs = self.list_jobs()
+        return self._connect_jobs_apis([j for j in jobs if j.target_email == self.email])
     
     @property
     def my_pending(self) -> JobCollection:
@@ -173,9 +188,9 @@ class UnifiedAPI:
         Returns:
             CodeJob: The submitted job object with API methods attached
         """
-        if self._ds_api is None:
+        if self.client is None:
             raise RuntimeError("API not properly initialized")
-        job = self._ds_api.submit_job(target_email, code_folder, name, description, tags)
+        job = self.client.submit_job(target_email, code_folder, name, description, tags)
         return self._connect_job_apis(job)
     
     def submit_python(self,
@@ -199,9 +214,9 @@ class UnifiedAPI:
         Returns:
             CodeJob: The submitted job object with API methods attached
         """
-        if self._ds_api is None:
+        if self.client is None:
             raise RuntimeError("API not properly initialized")
-        job = self._ds_api.create_python_job(target_email, script_content, name, description, requirements, tags)
+        job = self.client.create_python_job(target_email, script_content, name, description, requirements, tags)
         return self._connect_job_apis(job)
     
     def submit_bash(self,
@@ -223,9 +238,9 @@ class UnifiedAPI:
         Returns:
             CodeJob: The submitted job object with API methods attached
         """
-        if self._ds_api is None:
+        if self.client is None:
             raise RuntimeError("API not properly initialized")
-        job = self._ds_api.create_bash_job(target_email, script_content, name, description, tags)
+        job = self.client.create_bash_job(target_email, script_content, name, description, tags)
         return self._connect_job_apis(job)
     
     # Legacy Functional API (for backward compatibility)
@@ -239,28 +254,28 @@ class UnifiedAPI:
     
     def get_job(self, job_uid: Union[str, UUID]) -> Optional[CodeJob]:
         """Get a specific job by its UID (functional API)."""
-        if self._ds_api is None:
+        if self.client is None:
             return None
-        job = self._ds_api.get_job(job_uid)
+        job = self.client.get_job(job_uid)
         return self._connect_job_apis(job) if job else None
     
     def get_job_output(self, job_uid: Union[str, UUID]) -> Optional[Path]:
         """Get the output directory for a completed job (functional API)."""
-        if self._ds_api is None:
+        if self.client is None:
             return None
-        return self._ds_api.get_job_output(job_uid)
+        return self.client.get_job_output(job_uid)
     
     def get_job_logs(self, job_uid: Union[str, UUID]) -> Optional[str]:
         """Get the execution logs for a job (functional API)."""
-        if self._ds_api is None:
+        if self.client is None:
             return None
-        return self._ds_api.get_job_logs(job_uid)
+        return self.client.get_job_logs(job_uid)
     
     def wait_for_completion(self, job_uid: Union[str, UUID], timeout: int = 600) -> CodeJob:
         """Wait for a job to complete (functional API)."""
-        if self._ds_api is None:
+        if self.client is None:
             raise RuntimeError("API not properly initialized")
-        job = self._ds_api.wait_for_completion(job_uid, timeout)
+        job = self.client.wait_for_completion(job_uid, timeout)
         return self._connect_job_apis(job)
     
     # Legacy Job Management (Data Owner functionality)
@@ -274,23 +289,23 @@ class UnifiedAPI:
     
     def approve(self, job_uid: Union[str, UUID], reason: Optional[str] = None) -> bool:
         """Approve a job for execution (functional API)."""
-        if self._do_api is None:
+        if self.client is None:
             return False
-        return self._do_api.approve_job(job_uid, reason)
+        return self.client.approve_job(job_uid, reason)
     
     def reject(self, job_uid: Union[str, UUID], reason: Optional[str] = None) -> bool:
         """Reject a job (functional API)."""
-        if self._do_api is None:
+        if self.client is None:
             return False
-        return self._do_api.reject_job(job_uid, reason)
+        return self.client.reject_job(job_uid, reason)
     
     def review_job(self, job_uid: Union[str, UUID]) -> Optional[dict]:
         """Get detailed information about a job for review (functional API)."""
-        if self._do_api is None:
+        if self.client is None:
             return None
         
         # Get the job and use its review method
-        job = self._do_api.get_job(str(job_uid))
+        job = self.client.get_job(str(job_uid))
         if job is None:
             return None
         
@@ -420,7 +435,7 @@ def __getattr__(name):
     else:
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = [
     # Global unified API
     "jobs",
@@ -449,11 +464,6 @@ __all__ = [
     "review_job",
     "status",
     "help",
-    
-    # Legacy support (for existing code)
-    "DataOwnerAPI",
-    "DataScientistAPI",
-    "submit_code",
     
     # Lower-level APIs
     "CodeQueueClient",

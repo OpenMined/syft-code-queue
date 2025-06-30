@@ -3,14 +3,13 @@
 import enum
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING, List
+from typing import Optional, TYPE_CHECKING, List, Union
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 if TYPE_CHECKING:
-    from .data_owner_api import DataOwnerAPI
-    from .data_scientist_api import DataScientistAPI
+    from .client import CodeQueueClient
 
 
 class JobStatus(str, enum.Enum):
@@ -54,8 +53,7 @@ class CodeJob(BaseModel):
     tags: list[str] = Field(default_factory=list)
     
     # Internal references (private attributes)
-    _do_api: Optional["DataOwnerAPI"] = PrivateAttr(default=None)
-    _ds_api: Optional["DataScientistAPI"] = PrivateAttr(default=None)
+    _client: Optional["CodeQueueClient"] = PrivateAttr(default=None)
     
     def update_status(self, new_status: JobStatus, error_message: Optional[str] = None):
         """Update job status with timestamp."""
@@ -97,10 +95,10 @@ class CodeJob(BaseModel):
         Returns:
             bool: True if approved successfully
         """
-        if self._do_api is None:
+        if self._client is None:
             raise RuntimeError("Job not connected to DataOwner API - cannot approve")
         
-        success = self._do_api.approve_job(str(self.uid), reason)
+        success = self._client.approve_job(str(self.uid), reason)
         if success:
             # Update local status immediately for better UX
             self.status = JobStatus.approved
@@ -117,10 +115,10 @@ class CodeJob(BaseModel):
         Returns:
             bool: True if rejected successfully  
         """
-        if self._do_api is None:
+        if self._client is None:
             raise RuntimeError("Job not connected to DataOwner API - cannot reject")
         
-        success = self._do_api.reject_job(str(self.uid), reason)
+        success = self._client.reject_job(str(self.uid), reason)
         if success:
             # Update local status immediately for better UX
             self.status = JobStatus.rejected
@@ -133,16 +131,16 @@ class CodeJob(BaseModel):
     
     def review(self) -> Optional[dict]:
         """Get detailed review information for this job."""
-        if self._do_api is None:
+        if self._client is None:
             raise RuntimeError("Job not connected to DataOwner API - cannot review")
         
         # Get the full job details
-        job = self._do_api.get_job(str(self.uid))
+        job = self._client.get_job(str(self.uid))
         if job is None:
             return None
         
         # Get code files if available
-        code_files = self._do_api.get_job_code_files(str(self.uid)) or []
+        code_files = self._client.get_job_code_files(str(self.uid)) or []
         
         return {
             "uid": str(self.uid),
@@ -159,21 +157,21 @@ class CodeJob(BaseModel):
     
     def get_output(self) -> Optional[Path]:
         """Get the output directory for this job."""
-        if self._ds_api is None:
+        if self._client is None:
             raise RuntimeError("Job not connected to DataScientist API - cannot get output")
-        return self._ds_api.get_job_output(self.uid)
+        return self._client.get_job_output(self.uid)
     
     def get_logs(self) -> Optional[str]:
         """Get the execution logs for this job."""
-        if self._ds_api is None:
+        if self._client is None:
             raise RuntimeError("Job not connected to DataScientist API - cannot get logs")
-        return self._ds_api.get_job_logs(self.uid)
+        return self._client.get_job_logs(self.uid)
     
     def wait_for_completion(self, timeout: int = 600) -> "CodeJob":
         """Wait for this job to complete."""
-        if self._ds_api is None:
+        if self._client is None:
             raise RuntimeError("Job not connected to DataScientist API - cannot wait")
-        return self._ds_api.wait_for_completion(self.uid, timeout)
+        return self._client.wait_for_completion(self.uid, timeout)
     
     def _repr_html_(self):
         """HTML representation for Jupyter notebooks."""
@@ -211,7 +209,7 @@ class CodeJob(BaseModel):
         # Action buttons based on status and available APIs
         actions_html = ""
         if self.status == JobStatus.pending:
-            if self._do_api is not None:  # This is a job for me to approve
+            if self._client is not None:  # This is a job for me to approve
                 actions_html = f'''
         <div class="syft-actions">
             <div class="syft-meta">
@@ -239,7 +237,7 @@ class CodeJob(BaseModel):
         </div>
         '''
         elif self.status in (JobStatus.running, JobStatus.completed, JobStatus.failed):
-            if self._ds_api is not None:  # This is my job, can see logs/output
+            if self._client is not None:  # This is my job, can see logs/output
                 actions_html = f'''
         <div class="syft-actions">
             <div class="syft-meta">
@@ -860,29 +858,13 @@ class JobCollection(list[CodeJob]):
         """
         refreshed_jobs = []
         for job in self:
-            if job._do_api is not None:
+            if job._client is not None:
                 # Try to get updated job from DataOwner API
-                updated_job = job._do_api.get_job(str(job.uid))
+                updated_job = job._client.get_job(str(job.uid))
                 if updated_job:
-                    # Copy API connections to the updated job
-                    updated_job._do_api = job._do_api
-                    updated_job._ds_api = job._ds_api
                     refreshed_jobs.append(updated_job)
                 else:
                     refreshed_jobs.append(job)
-            elif job._ds_api is not None:
-                # Try to get updated job from DataScientist API
-                updated_job = job._ds_api.get_job(job.uid)
-                if updated_job:
-                    # Copy API connections to the updated job
-                    updated_job._do_api = job._do_api
-                    updated_job._ds_api = job._ds_api
-                    refreshed_jobs.append(updated_job)
-                else:
-                    refreshed_jobs.append(job)
-            else:
-                # No API connection, keep original job
-                refreshed_jobs.append(job)
         
         return JobCollection(refreshed_jobs)
     
@@ -906,7 +888,7 @@ class JobCollection(list[CodeJob]):
         
         # Check if this is a filtered collection
         if all(job.status == JobStatus.pending for job in self):
-            if all(job._do_api is not None for job in self):
+            if all(job._client is not None for job in self):
                 collection_type = "Jobs Awaiting Your Approval"
                 collection_description = "Review and approve/reject these jobs"
             else:
@@ -1189,7 +1171,7 @@ class JobCollection(list[CodeJob]):
         """
         
         # Add batch approval buttons if any jobs can be approved
-        if any(job.status == JobStatus.pending and job._do_api is not None for job in self):
+        if any(job.status == JobStatus.pending and job._client is not None for job in self):
             html_content += f"""
                 <button class="syft-batch-btn" onclick="batchApprove('{container_id}')">Approve Selected</button>
                 <button class="syft-batch-btn reject" onclick="batchReject('{container_id}')">Reject Selected</button>
@@ -1242,15 +1224,15 @@ class JobCollection(list[CodeJob]):
                     tags_html += f'<span class="syft-job-tag">+{len(job.tags)-2}</span>'
             
             # Build action buttons - pass index and collection type
-            collection_name = "pending_for_me" if (job.status == JobStatus.pending and job._do_api is not None) else "jobs_for_others"
+            collection_name = "pending_for_me" if (job.status == JobStatus.pending and job._client is not None) else "jobs_for_others"
             actions_html = ""
-            if job.status == JobStatus.pending and job._do_api is not None:
+            if job.status == JobStatus.pending and job._client is not None:
                 actions_html = f"""
                     <button class="syft-action-btn approve" onclick="approveJob({i}, '{collection_name}')">✓</button>
                     <button class="syft-action-btn reject" onclick="rejectJob({i}, '{collection_name}')">✗</button>
                     <button class="syft-action-btn" onclick="reviewJob({i}, '{collection_name}')">👁️</button>
                 """
-            elif job.status in (JobStatus.running, JobStatus.completed, JobStatus.failed) and job._ds_api is not None:
+            elif job.status in (JobStatus.running, JobStatus.completed, JobStatus.failed) and job._client is not None:
                 actions_html = f"""
                     <button class="syft-action-btn" onclick="viewLogs({i}, '{collection_name}')">📜</button>
                     <button class="syft-action-btn" onclick="viewOutput({i}, '{collection_name}')">📁</button>

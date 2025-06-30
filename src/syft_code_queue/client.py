@@ -281,7 +281,17 @@ class CodeQueueClient:
             # Original behavior: search only local queue directory
             # Determine which status directories to search
             if status:
-                status_dirs = [self._get_status_dir(status)]
+                # Handle both string and enum status values
+                if isinstance(status, str):
+                    # Convert string to JobStatus enum
+                    try:
+                        status_enum = JobStatus(status)
+                    except ValueError:
+                        logger.warning(f"Invalid status string: {status}")
+                        return []
+                else:
+                    status_enum = status
+                status_dirs = [self._get_status_dir(status_enum)]
             else:
                 status_dirs = [self._get_status_dir(s) for s in JobStatus]
 
@@ -367,7 +377,12 @@ class CodeQueueClient:
 
                 # Determine which status directories to search
                 if status:
-                    status_dirs = [queue_dir / status.value]
+                    # Handle both string and enum status values
+                    if isinstance(status, str):
+                        status_value = status
+                    else:
+                        status_value = status.value
+                    status_dirs = [queue_dir / status_value]
                 else:
                     status_dirs = [queue_dir / s.value for s in JobStatus]
 

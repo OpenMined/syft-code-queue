@@ -186,7 +186,8 @@ class UnifiedAPI:
         """Jobs I've submitted to other people."""
         if self.client is None:
             return JobCollection([])
-        jobs = self.list_jobs()
+        # Search across all datasites since jobs are stored in target's datasite
+        jobs = self.list_jobs(search_all_datasites=True)
         return self._connect_jobs_apis([j for j in jobs if j.requester_email == self.email])
     
     @property
@@ -607,7 +608,7 @@ def __getattr__(name):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
-__version__ = "0.1.18"
+__version__ = "0.1.19"
 __all__ = [
     # Global unified API
     "jobs",

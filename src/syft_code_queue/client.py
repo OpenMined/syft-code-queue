@@ -153,6 +153,9 @@ class CodeQueueClient:
         old_job = self.get_job(job.uid)
         old_status = old_job.status if old_job else None
 
+        # Get the current in-memory status (bypass file-backed properties)
+        current_status = object.__getattribute__(job, "status")
+
         # Determine if this is a cross-datasite job
         if hasattr(job, '_datasite_path') and job._datasite_path is not None:
             # Cross-datasite job - work with the original datasite location
@@ -165,16 +168,16 @@ class CodeQueueClient:
                 return get_cross_datasite_status_dir(job_status) / str(job.uid)
             
             # If status changed, move job directory to new status directory
-            if old_status and old_status != job.status:
+            if old_status and old_status != current_status:
                 old_job_dir = get_cross_datasite_status_dir(old_status) / str(job.uid)
-                new_job_dir = get_cross_datasite_job_dir(job.status)
+                new_job_dir = get_cross_datasite_status_dir(current_status) / str(job.uid)
 
                 if old_job_dir.exists():
                     try:
                         # Move the entire job directory
                         new_job_dir.parent.mkdir(parents=True, exist_ok=True)
                         # Ensure syft.pub.yaml exists for pending directories
-                        if job.status == JobStatus.pending:
+                        if current_status == JobStatus.pending:
                             self._create_pending_syftperm(new_job_dir.parent)
                         if new_job_dir.exists():
                             shutil.rmtree(new_job_dir)
@@ -188,11 +191,11 @@ class CodeQueueClient:
                         raise RuntimeError(f"Failed to move job: {e}")
 
             # Ensure job directory exists and save metadata
-            job_dir = get_cross_datasite_job_dir(job.status)
+            job_dir = get_cross_datasite_status_dir(current_status) / str(job.uid)
             try:
                 job_dir.mkdir(parents=True, exist_ok=True)
                 # Ensure syft.pub.yaml exists for pending directories in cross-datasite jobs
-                if job.status == JobStatus.pending:
+                if current_status == JobStatus.pending:
                     self._create_pending_syftperm(job_dir.parent)
                 job_file = job_dir / "metadata.json"
 
@@ -219,9 +222,9 @@ class CodeQueueClient:
         else:
             # Local job - use original logic
             # If status changed, move job directory to new status directory
-            if old_status and old_status != job.status:
+            if old_status and old_status != current_status:
                 old_job_dir = self._get_status_dir(old_status) / str(job.uid)
-                new_job_dir = self._get_job_dir(job)
+                new_job_dir = self._get_status_dir(current_status) / str(job.uid)
 
                 if old_job_dir.exists():
                     # Move the entire job directory
@@ -603,7 +606,19 @@ class CodeQueueClient:
                     if date_field in data and data[date_field] and isinstance(data[date_field], str):
                         data[date_field] = datetime.fromisoformat(data[date_field])
                 
-                return CodeJob.model_validate(data)
+                job = CodeJob.model_validate(data)
+                job._client = self
+                
+                # For cross-datasite jobs, set the datasite path
+                # A job is cross-datasite if the target is the current user (job was submitted TO us)
+                # and it's stored in our datasite, OR if we found it in our local search
+                # but it's not our job (requester_email != self.email)
+                if (job.target_email == self.email and job.requester_email != self.email):
+                    # This is a cross-datasite job submitted to us - set our datasite as the path
+                    job._datasite_path = self._get_queue_dir()
+                    logger.debug(f"Found cross-datasite job {job_uid} in local datasite - set datasite path")
+                
+                return job
         
         # If not found locally, search across all datasites
         logger.debug(f"Job {job_uid} not found locally, searching across all datasites")

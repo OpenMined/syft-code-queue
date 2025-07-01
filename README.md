@@ -21,6 +21,7 @@ Data Scientist → Submit Code → Data Owner Reviews → Manual Approve → Exe
 - **📊 Job Management**: Track job status and retrieve results
 - **⚡ Lightweight**: Much simpler than RDS while being fully functional
 - **🎨 Interactive Jupyter UI**: Beautiful HTML tables with clickable approve/reject buttons
+- **🔍 Tab Completion**: Full tab completion support for all properties and methods
 
 ## Quick Start
 
@@ -116,9 +117,8 @@ pip install syft-code-queue
 
 We provide role-specific tutorials for different users:
 
-- **🔬 Data Scientists**: `examples/DataScientist_Tutorial.ipynb` - Learn to submit and monitor jobs
-- **🏛️ Data Owners**: `examples/DataOwner_Tutorial.ipynb` - Learn to review and approve jobs  
-- **📋 Overview**: `examples/SyftCodeQueue_Tutorial.ipynb` - System overview and concepts
+- **🔬 Data Scientists**: `examples/Part 1 — Data Scientist Tutorial.ipynb` - Learn to submit and monitor jobs
+- **🏛️ Data Owners**: `examples/Part 2 — Data Owner Tutorial.ipynb` - Learn to review and approve jobs
 
 ## Manual Approval Architecture
 
@@ -155,7 +155,7 @@ def smart_approval_bot():
             subprocess.run(['scq', 'reject', job_id, '-r', 'Does not meet criteria'])
 ```
 
-See `examples/external_automation_example.py` for a complete example.
+See the examples directory for more automation examples.
 
 ## Code Package Structure
 
@@ -327,7 +327,7 @@ pip install -e .
 pytest
 
 # Run examples
-python examples/external_automation_example.py
+python examples/example_cross_datasite_workflow.py
 ```
 
 ## Contributing

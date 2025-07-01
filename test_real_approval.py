@@ -42,9 +42,7 @@ def main():
             if syft_pub_path.exists():
                 print("   ✅ Has syft.pub.yaml permissions (syft-perm managed)")
             else:
-                print(
-                    "   ❌ Missing syft.pub.yaml (old job - needs resubmission with new version)"
-                )
+                print("   ❌ Missing syft.pub.yaml (old job - needs resubmission with new version)")
         print()
 
     # Optionally approve the first job

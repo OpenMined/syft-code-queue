@@ -7,7 +7,6 @@ job output files in Jupyter notebooks, similar to the existing code review funct
 """
 
 
-
 def demonstrate_output_viewer():
     """Demonstrate the new output viewer functionality."""
 

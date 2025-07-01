@@ -1426,7 +1426,6 @@ class JobCollection(list[CodeJob]):
                 and job.target_email == current_user_email
             )
 
-
             actions_html = ""
             if can_approve_job:
                 # Jobs I can approve (submitted TO me)

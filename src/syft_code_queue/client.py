@@ -785,10 +785,14 @@ class CodeQueueClient:
     def get_job_output(self, job_uid: UUID) -> Optional[Path]:
         """Get the output folder for a completed job."""
         job = self.get_job(job_uid)
-        if not job or not job.output_folder:
+        if not job:
             return None
         
-        return job.output_folder
+        # Construct output directory path using cross-datasite aware job directory
+        job_dir = self._get_job_dir(job)
+        output_dir = job_dir / "output"
+        
+        return output_dir if output_dir.exists() else None
     
     def get_job_logs(self, job_uid: UUID) -> Optional[str]:
         """Get execution logs for a job."""
@@ -1190,10 +1194,13 @@ class CodeQueueClient:
             List of relative file paths in the job's output directory
         """
         job = self.get_job(job_uid)
-        if not job or not job.output_folder:
+        if not job:
             return []
 
-        output_dir = Path(job.output_folder)
+        # Construct output directory path using cross-datasite aware job directory
+        job_dir = self._get_job_dir(job)
+        output_dir = job_dir / "output"
+        
         if not output_dir.exists():
             return []
 
@@ -1222,10 +1229,12 @@ class CodeQueueClient:
             File contents as string, or None if file doesn't exist
         """
         job = self.get_job(job_uid)
-        if not job or not job.output_folder:
+        if not job:
             return None
 
-        output_dir = Path(job.output_folder)
+        # Construct output directory path using cross-datasite aware job directory
+        job_dir = self._get_job_dir(job)
+        output_dir = job_dir / "output"
         file_path = output_dir / filename
 
         # Security check: ensure the file is within the output directory

@@ -605,7 +605,23 @@ def __getattr__(name):
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
-__version__ = "0.1.21"
+def __dir__():
+    """Return list of available attributes for tab completion."""
+    return [
+        # Functions and objects
+        "jobs", "submit_job", "submit_python", "submit_bash", "my_jobs",
+        "get_job", "get_job_output", "get_job_logs", "wait_for_completion",
+        "all_jobs_for_me", "approve", "reject", "review_job", "inspect_job",
+        "read_job_file", "list_job_files", "status", "help", "submit_code",
+        # Dynamic properties that provide fresh data
+        "jobs_for_others", "jobs_for_me", "pending_for_me", "pending_for_others",
+        "my_pending", "my_running", "my_completed", "approved_by_me",
+        # Classes and enums
+        "CodeQueueClient", "create_client", "CodeJob", "JobStatus", "QueueConfig", "JobCollection"
+    ]
+
+
+__version__ = "0.1.23"
 __all__ = [
     # Global unified API
     "jobs",

@@ -35,6 +35,41 @@ from loguru import logger
 from .client import CodeQueueClient, create_client
 from .models import CodeJob, JobCollection, JobStatus, QueueConfig
 
+# Global VERBOSE flag to control logging level
+VERBOSE = False
+
+
+def _configure_logging():
+    """Configure logging based on VERBOSE flag."""
+    # Remove default logger first
+    logger.remove()
+    
+    if VERBOSE:
+        # Verbose mode: show DEBUG and above
+        logger.add(
+            sink=lambda msg: print(msg, end=""),
+            level="DEBUG",
+            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        )
+    else:
+        # Quiet mode: only show WARNING and above
+        logger.add(
+            sink=lambda msg: print(msg, end=""),
+            level="WARNING", 
+            format="<level>{level}</level>: {message}",
+        )
+
+
+def set_verbose(enabled: bool):
+    """Set verbose logging on or off."""
+    global VERBOSE
+    VERBOSE = enabled
+    _configure_logging()
+
+
+# Configure logging on import
+_configure_logging()
+
 # Runner components moved to syft-simple-runner package
 # App execution moved to syft-simple-runner package
 
@@ -563,6 +598,11 @@ General:
   q.status()                    # Overall status summary
   q.help()                      # This help message
 
+Logging Control:
+  q.VERBOSE = True              # Enable verbose logging (DEBUG level)
+  q.VERBOSE = False             # Quiet logging (WARNING level only)  
+  q.set_verbose(True)           # Alternative way to enable verbose logging
+
 Job Lifecycle:
   📤 submit → ⏳ pending → ✅ approved → 🏃 running → 🎉 completed
                        ↘ 🚫 rejected            ↘ ❌ failed
@@ -648,6 +688,9 @@ def __dir__():
         "my_running",
         "my_completed",
         "approved_by_me",
+        # Logging control
+        "VERBOSE",
+        "set_verbose",
         # Classes and enums
         "CodeQueueClient",
         "create_client",
@@ -658,13 +701,36 @@ def __dir__():
     ]
 
 
-__version__ = "0.1.23"
+# Module-level attribute setter to handle VERBOSE flag changes
+import sys
+_this_module = sys.modules[__name__]
+_original_setattr = getattr(_this_module, '__setattr__', None)
+
+
+def _module_setattr(name, value):
+    """Intercept module-level attribute setting to handle VERBOSE flag."""
+    if name == "VERBOSE":
+        global VERBOSE
+        VERBOSE = value
+        _configure_logging()
+    elif _original_setattr:
+        _original_setattr(name, value)
+    else:
+        # Fallback to direct setting
+        globals()[name] = value
+
+
+# Replace the module's __setattr__ method
+setattr(_this_module, '__setattr__', _module_setattr)
+
+
+__version__ = "0.1.24"
 __all__ = [
     # Global unified API
     "jobs",
     # Object-oriented properties
     "jobs_for_others",
-    "jobs_for_me",
+    "jobs_for_me", 
     "pending_for_me",
     "pending_for_others",
     "my_pending",
@@ -674,7 +740,7 @@ __all__ = [
     # Convenience functions
     "submit_job",
     "submit_python",
-    "submit_bash",
+    "submit_bash", 
     "my_jobs",
     "get_job",
     "get_job_output",
@@ -689,12 +755,15 @@ __all__ = [
     "list_job_files",
     "status",
     "help",
+    # Logging control
+    "VERBOSE",
+    "set_verbose",
     # Lower-level APIs
     "CodeQueueClient",
-    "create_client",
+    "create_client", 
     # Models
     "CodeJob",
-    "JobStatus",
+    "JobStatus", 
     "QueueConfig",
     "JobCollection",
 ]

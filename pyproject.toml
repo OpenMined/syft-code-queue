@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "syft-code-queue"
-version = "0.1.23"
+version = "0.1.24"
 description = "Job submission and approval workflow for SyftBox (execution handled by syft-simple-runner)"
 readme = "README.md"
 license = {text = "Apache-2.0"}

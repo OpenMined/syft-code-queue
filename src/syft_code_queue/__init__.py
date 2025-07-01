@@ -663,7 +663,7 @@ def _module_setattr(name, value):
 setattr(_this_module, '__setattr__', _module_setattr)
 
 
-__version__ = "0.1.25"
+__version__ = "0.1.26"
 __all__ = [
     # Global unified API
     "jobs",

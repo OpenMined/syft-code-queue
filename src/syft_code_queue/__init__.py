@@ -535,77 +535,40 @@ class UnifiedAPI:
         pass
 
     def help(self):
-        """Show help and examples for using syft-code-queue."""
-        help_text = """
-🚀 Syft Code Queue Help
+        """Show focused help for core workflow methods."""
+        help_text = f"""
+🎯 SyftBox Code Queue v{__version__} - Core Workflow
 
-Import Convention:
-  import syft_code_queue as q
+📤 Submit Jobs:
+  q.submit_job("owner@org.com", "./my_analysis", "Statistical Analysis")
+  q.submit_python("owner@org.com", "print('hello')", "Quick Script") 
+  q.submit_bash("owner@org.com", "ls -la", "Directory Listing")
 
-Object-Oriented API (Recommended):
-  # Submit jobs
-  job = q.submit_job("data-owner@university.edu", "./my_analysis", "Statistical Analysis")
-  job = q.submit_script("owner@email.com", "print('hello')", "Hello Test")
+📋 Job Collections:
+  q.pending_for_me               # Jobs waiting for my approval (Data Owner)
+  q.pending_for_others           # Jobs I submitted that are pending (Data Scientist)
+  q.jobs_for_me                  # All jobs submitted to me
+  q.jobs_for_others              # All jobs I've submitted to others
 
-  # Access job collections
-  q.jobs_for_others              # Jobs I've submitted to others
-  q.jobs_for_me                  # Jobs submitted to me
-  q.pending_for_me               # Jobs waiting for my approval
-  q.pending_for_others           # Jobs I've submitted that are pending approval
-  q.my_pending                   # My jobs still pending approval (alias for pending_for_others)
-  q.my_running                   # My jobs currently running
-  q.my_completed                 # My completed jobs
+✅ Job Management:
+  q.approve("job-id", "Looks safe")     # Approve job
+  q.reject("job-id", "Too broad")       # Reject job
 
-  # Work with individual jobs
+🔍 Basic Monitoring:
+  q.get_job("job-id")                   # Get specific job details
+  q.wait_for_completion("job-id")       # Wait for job to finish
+
+💡 Object-Oriented Usage:
   q.jobs_for_me[0].approve("Looks safe")
-  q.jobs_for_me[0].reject("Too broad")
-  q.jobs_for_others[0].get_logs()
+  q.pending_for_others.summary()
   q.jobs_for_others[0].wait_for_completion()
 
-  # Work with collections
-  q.pending_for_me.approve_all("Batch approval")
-  q.jobs_for_me.pending().approve_all("All look good")
-  q.pending_for_others.summary()                # Check status of jobs I submitted
-  q.jobs_for_others.by_tags("statistics").summary()
-
-  # Filter collections
-  q.jobs_for_me.by_status(q.JobStatus.completed)
-  q.jobs_for_others.by_name("analysis")
-  q.jobs_for_me.pending()
-  q.jobs_for_others.completed()
-
-Functional API (Legacy):
-  # Submit jobs
-  job = q.submit_job("data-owner@university.edu", "./my_analysis", "Statistical Analysis")
-
-  # Monitor your submitted jobs
-  q.my_jobs()                    # All your jobs
-  q.get_job("job-id")           # Specific job
-  q.get_job_logs("job-id")      # Job logs
-  q.wait_for_completion("job-id") # Wait for completion
-
-  # Manage jobs submitted to you
-  q.all_jobs_for_me()           # All jobs submitted to you
-  q.approve("job-id", "Looks safe")  # Approve job
-  q.reject("job-id", "Too broad")    # Reject job
-
-  # Code review
-  q.inspect_job("job-id")       # Detailed code review
-  q.list_job_files("job-id")    # List files in job
-  q.read_job_file("job-id", "run.sh")  # Read specific file
-
-General:
-  q.status()                    # Overall status summary
-  q.help()                      # This help message
-
-Logging Control:
-  q.VERBOSE = True              # Enable verbose logging (DEBUG level)
-  q.VERBOSE = False             # Quiet logging (WARNING level only)  
-  q.set_verbose(True)           # Alternative way to enable verbose logging
-
-Job Lifecycle:
+📊 Job Lifecycle:
   📤 submit → ⏳ pending → ✅ approved → 🏃 running → 🎉 completed
                        ↘ 🚫 rejected            ↘ ❌ failed
+
+🔧 Need more methods? All advanced features are still available, just not in autocomplete.
+   Use q.VERBOSE=True for debugging. See documentation for full API.
         """
         print(help_text)
 
@@ -657,47 +620,23 @@ def __getattr__(name):
 
 
 def __dir__():
-    """Return list of available attributes for tab completion."""
+    """Return list of available attributes for tab completion - only essential methods."""
     return [
-        # Functions and objects
-        "jobs",
+        # Job submission
         "submit_job",
-        "submit_python",
+        "submit_python", 
         "submit_bash",
-        "my_jobs",
-        "get_job",
-        "get_job_output",
-        "get_job_logs",
-        "wait_for_completion",
-        "all_jobs_for_me",
-        "approve",
-        "reject",
-        "review_job",
-        "inspect_job",
-        "read_job_file",
-        "list_job_files",
-        "status",
-        "help",
-        "submit_code",
-        # Dynamic properties that provide fresh data
-        "jobs_for_others",
-        "jobs_for_me",
+        # Job collections
         "pending_for_me",
         "pending_for_others",
-        "my_pending",
-        "my_running",
-        "my_completed",
-        "approved_by_me",
-        # Logging control
-        "VERBOSE",
-        "set_verbose",
-        # Classes and enums
-        "CodeQueueClient",
-        "create_client",
-        "CodeJob",
-        "JobStatus",
-        "QueueConfig",
-        "JobCollection",
+        "jobs_for_me",
+        "jobs_for_others",
+        # Job management
+        "approve",
+        "reject",
+        # Basic monitoring
+        "get_job",
+        "wait_for_completion",
     ]
 
 
@@ -724,7 +663,7 @@ def _module_setattr(name, value):
 setattr(_this_module, '__setattr__', _module_setattr)
 
 
-__version__ = "0.1.24"
+__version__ = "0.1.25"
 __all__ = [
     # Global unified API
     "jobs",

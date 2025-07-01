@@ -558,6 +558,7 @@ class CodeQueueClient:
         name: str,
         description: Optional[str] = None,
         requirements: Optional[list[str]] = None,
+        timeout_seconds: int = 86400,  # 24 hours default
         tags: Optional[list[str]] = None,
     ) -> CodeJob:
         """
@@ -569,6 +570,7 @@ class CodeQueueClient:
             name: Human-readable name for the job
             description: Optional description
             requirements: Optional list of Python packages to install
+            timeout_seconds: Timeout in seconds after which job will be automatically rejected/failed (default: 24 hours)
             tags: Optional tags for categorization
 
         Returns:
@@ -600,6 +602,7 @@ class CodeQueueClient:
                 code_folder=temp_dir,
                 name=name,
                 description=description,
+                timeout_seconds=timeout_seconds,
                 tags=tags,
             )
 
@@ -614,6 +617,7 @@ class CodeQueueClient:
         script_content: str,
         name: str,
         description: Optional[str] = None,
+        timeout_seconds: int = 86400,  # 24 hours default
         tags: Optional[list[str]] = None,
     ) -> CodeJob:
         """
@@ -624,6 +628,7 @@ class CodeQueueClient:
             script_content: Bash script content
             name: Human-readable name for the job
             description: Optional description
+            timeout_seconds: Timeout in seconds after which job will be automatically rejected/failed (default: 24 hours)
             tags: Optional tags for categorization
 
         Returns:
@@ -651,6 +656,7 @@ class CodeQueueClient:
                 code_folder=temp_dir,
                 name=name,
                 description=description,
+                timeout_seconds=timeout_seconds,
                 tags=tags,
             )
 
@@ -665,6 +671,7 @@ class CodeQueueClient:
         code_folder: Path,
         name: str,
         description: Optional[str] = None,
+        timeout_seconds: int = 86400,  # 24 hours default
         tags: Optional[list[str]] = None,
     ) -> CodeJob:
         """
@@ -675,6 +682,7 @@ class CodeQueueClient:
             code_folder: Local folder containing code and run.sh
             name: Human-readable name for the job
             description: Optional description
+            timeout_seconds: Timeout in seconds after which job will be automatically rejected/failed (default: 24 hours)
             tags: Optional tags for categorization
 
         Returns:
@@ -694,6 +702,7 @@ class CodeQueueClient:
             target_email=target_email,
             code_folder=code_folder,
             description=description,
+            timeout_seconds=timeout_seconds,
             tags=tags or [],
         )
 

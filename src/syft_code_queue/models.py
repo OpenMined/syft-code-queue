@@ -45,6 +45,7 @@ class CodeJob(BaseModel):
 
     # Immutable metadata
     created_at: datetime = Field(default_factory=datetime.now)
+    timeout_seconds: int = Field(default=86400)  # 24 hours default
     tags: list[str] = Field(default_factory=list)
 
     # Mutable fields (these store initial/fallback values)
@@ -319,6 +320,41 @@ class CodeJob(BaseModel):
     def is_terminal(self) -> bool:
         """Check if job is in a terminal state."""
         return self.status in (JobStatus.completed, JobStatus.failed, JobStatus.rejected)
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if this job has exceeded its timeout."""
+        if self.is_terminal:
+            return False  # Terminal jobs can't expire
+        
+        from datetime import datetime
+        now = datetime.now()
+        age_seconds = (now - self.created_at).total_seconds()
+        return age_seconds > self.timeout_seconds
+
+    @property
+    def time_remaining(self) -> int:
+        """Get remaining time in seconds before job expires. Returns 0 if expired."""
+        if self.is_terminal:
+            return 0
+        
+        from datetime import datetime
+        now = datetime.now()
+        age_seconds = (now - self.created_at).total_seconds()
+        remaining = max(0, self.timeout_seconds - age_seconds)
+        return int(remaining)
+
+    def get_timeout_status(self) -> JobStatus:
+        """Determine what status an expired job should be moved to."""
+        if self.status == JobStatus.pending:
+            # Pending jobs that timeout are considered rejected (datasite owner never responded)
+            return JobStatus.rejected
+        elif self.status in (JobStatus.approved, JobStatus.running):
+            # Approved/running jobs that timeout are considered failed (execution timeout)
+            return JobStatus.failed
+        else:
+            # Should not happen, but default to failed
+            return JobStatus.failed
 
     @property
     def duration(self) -> Optional[float]:
@@ -1910,6 +1946,7 @@ class JobCreate(BaseModel):
     target_email: str
     code_folder: Path
     description: Optional[str] = None
+    timeout_seconds: int = Field(default=86400)  # 24 hours default
     tags: list[str] = Field(default_factory=list)
 
 
@@ -2759,3 +2796,531 @@ class OutputViewerWidget:
             return "🎯"
         else:
             return "📄"
+
+
+class DataSitesCollection:
+    """Collection of datasites that have open syft-code-queues."""
+
+    def __init__(self, syftbox_client=None):
+        """Initialize the datasites collection."""
+        self.syftbox_client = syftbox_client
+        self._override_data = None  # Used for filtered collections
+
+    def _get_current_data(self):
+        """Get current datasites data - either overridden (for filtered) or fresh from filesystem."""
+        if self._override_data is not None:
+            return self._override_data
+        return self._load_datasites()
+
+    def _load_datasites(self):
+        """Load all datasites with open code queues. Returns fresh data every time."""
+        from loguru import logger
+        
+        datasites = []
+        
+        if not self.syftbox_client:
+            logger.warning("No SyftBox client available - cannot scan for datasites")
+            return datasites
+
+        try:
+            datasites_dir = self.syftbox_client.datasites
+            if not datasites_dir.exists():
+                logger.warning(f"Datasites directory does not exist: {datasites_dir}")
+                return datasites
+
+            logger.debug(f"Scanning for datasites with code queues in: {datasites_dir}")
+
+            # Iterate through all datasites
+            for datasite_dir in datasites_dir.iterdir():
+                if not datasite_dir.is_dir():
+                    continue
+                
+                # Check if it's a valid email-like datasite
+                if "@" not in datasite_dir.name:
+                    continue
+
+                try:
+                    # Check if this datasite has a code-queue app
+                    queue_dir = datasite_dir / "app_data" / "code-queue" / "jobs"
+                    if not queue_dir.exists():
+                        continue
+
+                    # Count jobs in different statuses, deduplicating by UID
+                    # Pipeline order: pending -> approved/rejected -> running -> completed/failed
+                    pipeline_order = ["pending", "approved", "rejected", "running", "completed", "failed"]
+                    
+                    # Collect all job UIDs and their statuses
+                    job_uids_by_status = {}
+                    all_job_uids = {}  # uid -> latest_status_in_pipeline
+                    
+                    for status in JobStatus:
+                        status_dir = queue_dir / status.value
+                        if status_dir.exists():
+                            job_dirs = [d for d in status_dir.iterdir() if d.is_dir()]
+                            job_uids_by_status[status.value] = set(d.name for d in job_dirs)
+                            
+                            # Track the latest status for each UID
+                            for job_dir in job_dirs:
+                                uid = job_dir.name
+                                current_status_index = pipeline_order.index(status.value)
+                                
+                                if uid not in all_job_uids:
+                                    all_job_uids[uid] = status.value
+                                else:
+                                    # Keep the status that's furthest in the pipeline
+                                    existing_status_index = pipeline_order.index(all_job_uids[uid])
+                                    if current_status_index > existing_status_index:
+                                        all_job_uids[uid] = status.value
+                        else:
+                            job_uids_by_status[status.value] = set()
+                    
+                    # Count deduplicated jobs by their actual (latest) status
+                    status_counts = {}
+                    for status in JobStatus:
+                        status_counts[status.value] = 0
+                    
+                    for uid, actual_status in all_job_uids.items():
+                        status_counts[actual_status] += 1
+                    
+                    total_jobs = len(all_job_uids)
+
+                    # Check if pending directory has proper permissions for code queue
+                    pending_dir = queue_dir / "pending"
+                    has_permissions = pending_dir.exists() and (pending_dir / "syft.pub.yaml").exists()
+
+                    # Analyze responsiveness history
+                    responsiveness_info = self._analyze_responsiveness(queue_dir)
+
+                    datasite_info = {
+                        "email": datasite_dir.name,
+                        "queue_path": queue_dir,
+                        "total_jobs": total_jobs,
+                        "status_counts": status_counts,
+                        "has_permissions": has_permissions,
+                        "responsiveness": responsiveness_info["category"],
+                        "responded_to_me": responsiveness_info["responded_to_me"],
+                        "responded_to_others": responsiveness_info["responded_to_others"],
+                        "total_responses": responsiveness_info["total_responses"],
+                        "last_response_to_me": responsiveness_info["last_response_to_me"],
+                        "last_activity": self._get_last_activity(queue_dir)
+                    }
+                    
+                    datasites.append(datasite_info)
+                    logger.debug(f"Found datasite with code queue: {datasite_dir.name}")
+
+                except Exception as e:
+                    logger.debug(f"Error scanning datasite {datasite_dir.name}: {e}")
+                    continue
+
+            # Sort by activity level and then by email
+            datasites.sort(key=lambda x: (-x["total_jobs"], x["email"]))
+            return datasites
+
+        except Exception as e:
+            logger.error(f"Error scanning for datasites: {e}")
+            return datasites
+
+    def _get_last_activity(self, queue_dir):
+        """Get the last activity timestamp for a queue directory.
+        
+        Only considers jobs that have been processed (approved, running, completed, failed, rejected).
+        Pending jobs don't count as activity since they're just waiting for action.
+        """
+        try:
+            latest_time = None
+            # Only look at statuses that represent actual activity/processing
+            active_statuses = ["approved", "running", "completed", "failed", "rejected"]
+            
+            for status_name in active_statuses:
+                status_dir = queue_dir / status_name
+                if status_dir.exists() and status_dir.is_dir():
+                    for job_dir in status_dir.iterdir():
+                        if job_dir.is_dir():
+                            try:
+                                metadata_file = job_dir / "metadata.json"
+                                if metadata_file.exists():
+                                    mtime = metadata_file.stat().st_mtime
+                                    if latest_time is None or mtime > latest_time:
+                                        latest_time = mtime
+                            except:
+                                continue
+            
+            if latest_time:
+                from datetime import datetime
+                return datetime.fromtimestamp(latest_time)
+            return None
+        except:
+            return None
+
+    def _analyze_responsiveness(self, queue_dir):
+        """Analyze if this datasite has responded to job requests and to whom."""
+        try:
+            # Get current user's email
+            current_user_email = None
+            if self.syftbox_client:
+                current_user_email = self.syftbox_client.email
+            
+            # Statuses that indicate the datasite owner responded/took action
+            response_statuses = ["approved", "rejected", "running", "completed", "failed"]
+            
+            responded_to_me = False
+            responded_to_others = False
+            total_responses = 0
+            last_response_to_me = None
+            
+            for status_name in response_statuses:
+                status_dir = queue_dir / status_name
+                if not status_dir.exists():
+                    continue
+                    
+                for job_dir in status_dir.iterdir():
+                    if not job_dir.is_dir():
+                        continue
+                        
+                    try:
+                        metadata_file = job_dir / "metadata.json"
+                        if not metadata_file.exists():
+                            continue
+                            
+                        import json
+                        with open(metadata_file, 'r') as f:
+                            metadata = json.load(f)
+                            
+                        requester_email = metadata.get("requester_email")
+                        if not requester_email:
+                            continue
+                            
+                        total_responses += 1
+                        
+                        # Get the timestamp of this response
+                        response_time = metadata_file.stat().st_mtime
+                        
+                        if current_user_email and requester_email == current_user_email:
+                            responded_to_me = True
+                            # Track the most recent response to me
+                            if last_response_to_me is None or response_time > last_response_to_me:
+                                last_response_to_me = response_time
+                        else:
+                            responded_to_others = True
+                            
+                    except Exception as e:
+                        # Skip problematic job metadata
+                        continue
+            
+            # Determine category
+            if responded_to_me:
+                category = "responsive_to_me"
+            elif responded_to_others:
+                category = "responsive_to_others"
+            else:
+                category = "unresponsive"
+            
+            # Convert timestamp to datetime
+            last_response_to_me_dt = None
+            if last_response_to_me:
+                from datetime import datetime
+                last_response_to_me_dt = datetime.fromtimestamp(last_response_to_me)
+                
+            return {
+                "category": category,
+                "responded_to_me": responded_to_me,
+                "responded_to_others": responded_to_others,
+                "total_responses": total_responses,
+                "last_response_to_me": last_response_to_me_dt
+            }
+            
+        except Exception as e:
+            # Default to unresponsive if we can't determine
+            return {
+                "category": "unresponsive",
+                "responded_to_me": False,
+                "responded_to_others": False,
+                "total_responses": 0,
+                "last_response_to_me": None
+            }
+
+    def refresh(self):
+        """Refresh is not needed since datasites collection is always fresh from filesystem."""
+        return self
+
+    def responsive_to_me(self):
+        """Filter to datasites that have responded to my job requests before."""
+        datasites = self._load_datasites()
+        responsive_datasites = [ds for ds in datasites if ds["responsiveness"] == "responsive_to_me"]
+        collection = DataSitesCollection(self.syftbox_client)
+        collection._override_data = responsive_datasites
+        return collection
+    
+    def responsive(self):
+        """Filter to datasites that have responded to anyone's job requests."""
+        datasites = self._load_datasites()
+        responsive_datasites = [ds for ds in datasites if ds["responsiveness"] in ["responsive_to_me", "responsive_to_others"]]
+        collection = DataSitesCollection(self.syftbox_client)
+        collection._override_data = responsive_datasites
+        return collection
+
+    def with_pending_jobs(self):
+        """Filter to datasites with pending jobs."""
+        datasites = self._load_datasites()
+        pending_datasites = [ds for ds in datasites if ds["status_counts"]["pending"] > 0]
+        collection = DataSitesCollection(self.syftbox_client)
+        collection._override_data = pending_datasites
+        return collection
+
+    def __len__(self):
+        return len(self._get_current_data())
+
+    def __iter__(self):
+        return iter(self._get_current_data())
+
+    def __getitem__(self, index):
+        current_data = self._get_current_data()
+        if isinstance(index, slice):
+            collection = DataSitesCollection(self.syftbox_client)
+            collection._override_data = current_data[index]
+            return collection
+        return current_data[index]
+
+    def to_list(self):
+        """Convert to a simple list of datasite info."""
+        return list(self._get_current_data())
+
+    def __str__(self):
+        """Display datasites as a nice table."""
+        datasites = self._get_current_data()
+        
+        if not datasites:
+            return "No datasites with code queues found"
+
+        try:
+            from tabulate import tabulate
+            table_data = []
+            
+            for i, datasite in enumerate(datasites):
+                email = datasite["email"]
+                total = datasite["total_jobs"]
+                pending = datasite["status_counts"]["pending"]
+                running = datasite["status_counts"]["running"]
+                completed = datasite["status_counts"]["completed"]
+                # Determine status display based on responsiveness
+                if datasite["responsiveness"] == "responsive_to_me":
+                    status = "🟢 Responsive to Me"
+                elif datasite["responsiveness"] == "responsive_to_others":
+                    status = "🟡 Responsive to Others" 
+                else:
+                    status = "🔴 Unresponsive"
+                
+                # Format last activity
+                last_activity = datasite["last_activity"]
+                if last_activity:
+                    from datetime import datetime, timedelta
+                    diff = datetime.now() - last_activity
+                    if diff.days > 0:
+                        activity_str = f"{diff.days}d ago"
+                    elif diff.seconds > 3600:
+                        activity_str = f"{diff.seconds // 3600}h ago"
+                    else:
+                        activity_str = f"{diff.seconds // 60}m ago"
+                else:
+                    activity_str = "Never"
+
+                # Format last response to me
+                last_response_to_me = datasite["last_response_to_me"]
+                if last_response_to_me:
+                    from datetime import datetime, timedelta
+                    diff = datetime.now() - last_response_to_me
+                    if diff.days > 0:
+                        response_to_me_str = f"{diff.days}d ago"
+                    elif diff.seconds > 3600:
+                        response_to_me_str = f"{diff.seconds // 3600}h ago"
+                    else:
+                        response_to_me_str = f"{diff.seconds // 60}m ago"
+                else:
+                    response_to_me_str = "Never"
+
+                table_data.append([
+                    i, email, status, total, pending, running, completed, activity_str, response_to_me_str
+                ])
+
+            headers = ["#", "Email", "Responsiveness", "Total", "Pending", "Running", "Completed", "Last Activity", "Last Response to Me"]
+            return tabulate(table_data, headers=headers, tablefmt="grid")
+            
+        except ImportError:
+            lines = ["Available DataSites with Code Queues:"]
+            for i, datasite in enumerate(datasites):
+                email = datasite["email"]
+                total = datasite["total_jobs"]
+                pending = datasite["status_counts"]["pending"]
+                # Determine status for text display
+                if datasite["responsiveness"] == "responsive_to_me":
+                    status = "Responsive to Me"
+                elif datasite["responsiveness"] == "responsive_to_others":
+                    status = "Responsive to Others"
+                else:
+                    status = "Unresponsive"
+                lines.append(f"{i}: {email} ({status}) - {total} total jobs, {pending} pending")
+            return "\n".join(lines)
+
+    def __repr__(self):
+        return self.__str__()
+
+    def _repr_html_(self):
+        """Return HTML representation for Jupyter notebooks."""
+        datasites = self._get_current_data()
+        
+        if not datasites:
+            return """
+            <div style="padding: 20px; border: 2px solid #ddd; border-radius: 8px; background-color: #f9f9f9;">
+                <h3 style="color: #666; margin-top: 0;">📡 DataSites with Code Queues</h3>
+                <p style="color: #888;">No datasites with code queues found</p>
+            </div>
+            """
+
+        # Create HTML table
+        html = """
+        <div style="padding: 20px; border: 2px solid #ddd; border-radius: 8px; background-color: #f9f9f9;">
+            <h3 style="color: #333; margin-top: 0;">📡 DataSites with Code Queues</h3>
+            <div style="overflow-x: auto; margin-top: 10px;">
+                <table style="min-width: 1000px; border-collapse: collapse; width: 100%;">
+                    <thead>
+                        <tr style="background-color: #e9e9e9;">
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left; min-width: 30px;">#</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left; min-width: 200px;">Email</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left; min-width: 140px;">Responsiveness</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 50px;">Total</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 60px;">Pending</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 60px;">Running</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 70px;">Completed</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 100px;">Last Activity</th>
+                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 120px;">Last Response to Me</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        """
+        
+        for i, datasite in enumerate(datasites):
+            email = datasite["email"]
+            total = datasite["total_jobs"]
+            pending = datasite["status_counts"]["pending"]
+            running = datasite["status_counts"]["running"]
+            completed = datasite["status_counts"]["completed"]
+            
+            # Status with color coding based on responsiveness
+            if datasite["responsiveness"] == "responsive_to_me":
+                status_badge = '<span style="color: #28a745; font-weight: bold;">🟢 Responsive to Me</span>'
+            elif datasite["responsiveness"] == "responsive_to_others":
+                status_badge = '<span style="color: #ffc107; font-weight: bold;">🟡 Responsive to Others</span>'
+            else:
+                status_badge = '<span style="color: #dc3545; font-weight: bold;">🔴 Unresponsive</span>'
+            
+            # Format last activity
+            last_activity = datasite["last_activity"]
+            if last_activity:
+                from datetime import datetime, timedelta
+                diff = datetime.now() - last_activity
+                if diff.days > 0:
+                    activity_str = f"{diff.days}d ago"
+                elif diff.seconds > 3600:
+                    activity_str = f"{diff.seconds // 3600}h ago"
+                else:
+                    activity_str = f"{diff.seconds // 60}m ago"
+            else:
+                activity_str = "Never"
+
+            # Format last response to me
+            last_response_to_me = datasite["last_response_to_me"]
+            if last_response_to_me:
+                from datetime import datetime, timedelta
+                diff = datetime.now() - last_response_to_me
+                if diff.days > 0:
+                    response_to_me_str = f"{diff.days}d ago"
+                elif diff.seconds > 3600:
+                    response_to_me_str = f"{diff.seconds // 3600}h ago"
+                else:
+                    response_to_me_str = f"{diff.seconds // 60}m ago"
+            else:
+                response_to_me_str = "Never"
+
+            # Row color based on activity
+            row_color = "#fff" if i % 2 == 0 else "#f8f9fa"
+            
+            html += f"""
+                <tr style="background-color: {row_color};">
+                    <td style="padding: 8px; border: 1px solid #ddd;">{i}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd; font-family: monospace; word-break: break-all;">{email}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">{status_badge}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{total}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {'color: #dc3545; font-weight: bold;' if pending > 0 else ''}">{pending}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {'color: #007bff; font-weight: bold;' if running > 0 else ''}">{running}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {'color: #28a745; font-weight: bold;' if completed > 0 else ''}">{completed}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-size: 0.9em; color: #666;">{activity_str}</td>
+                    <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-size: 0.9em; color: #666;">{response_to_me_str}</td>
+                </tr>
+            """
+        
+        html += """
+                </tbody>
+            </table>
+            </div>
+            <div style="margin-top: 15px; padding: 10px; background-color: #e3f2fd; border-radius: 4px;">
+                <small style="color: #1976d2;">
+                                         <strong>💡 Usage:</strong> 
+                    <code>q.datasites.responsive_to_me()</code> • 
+                    <code>q.datasites.responsive()</code> • 
+                    <code>q.datasites.with_pending_jobs()</code>
+                </small>
+            </div>
+        </div>
+        """
+        
+        return html
+
+    def help(self):
+        """Show help for using the datasites collection."""
+        help_text = """
+📡 DataSites Collection Help
+
+Available Methods:
+- q.datasites                        # Show all datasites with code queues
+- q.datasites.responsive_to_me()     # Show datasites that have responded to MY jobs
+- q.datasites.responsive()           # Show datasites that have responded to ANYONE's jobs
+- q.datasites.with_pending_jobs()    # Show datasites with pending jobs
+- q.datasites[0]                     # Get first datasite info
+- len(q.datasites)                   # Count of datasites
+
+DataSite Info Structure:
+- email: Email address of the datasite
+- total_jobs: Total number of jobs in all statuses
+- status_counts: Dict with counts for each job status
+- has_permissions: Whether the datasite has proper queue permissions
+- responsiveness: "responsive_to_me", "responsive_to_others", or "unresponsive"
+- responded_to_me: Whether they've responded to my jobs before
+- responded_to_others: Whether they've responded to someone else's jobs
+- total_responses: Total number of jobs they've responded to
+- last_response_to_me: Timestamp of last time they responded to MY jobs
+- last_activity: Timestamp of last job activity
+
+Responsiveness Categories:
+🟢 Responsive to Me    - Has approved/rejected MY job requests before
+🟡 Responsive to Others - Has responded to someone's jobs (but not mine)
+🔴 Unresponsive        - Has never responded to anyone's job requests
+
+Examples:
+    # View all datasites
+    q.datasites
+    
+    # Get datasites that have responded to me before (highest chance of response)
+    trusted_sites = q.datasites.responsive_to_me()
+    
+    # Get any responsive datasites
+    responsive_sites = q.datasites.responsive()
+    
+    # Check a specific datasite's responsiveness
+    site_info = q.datasites[0]
+    print(f"Email: {site_info['email']}")
+    print(f"Responsiveness: {site_info['responsiveness']}")
+    print(f"Has responded to me: {site_info['responded_to_me']}")
+    print(f"Total responses: {site_info['total_responses']}")
+"""
+        print(help_text)
+        return help_text

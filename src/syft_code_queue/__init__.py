@@ -26,6 +26,7 @@ Usage:
     q.approve("job-id", "reason")
 """
 
+import sys
 from pathlib import Path
 from typing import Optional, Union
 from uuid import UUID
@@ -43,7 +44,7 @@ def _configure_logging():
     """Configure logging based on VERBOSE flag."""
     # Remove default logger first
     logger.remove()
-    
+
     if VERBOSE:
         # Verbose mode: show DEBUG and above
         logger.add(
@@ -55,7 +56,7 @@ def _configure_logging():
         # Quiet mode: only show WARNING and above
         logger.add(
             sink=lambda msg: print(msg, end=""),
-            level="WARNING", 
+            level="WARNING",
             format="<level>{level}</level>: {message}",
         )
 
@@ -541,7 +542,7 @@ class UnifiedAPI:
 
 📤 Submit Jobs:
   q.submit_job("owner@org.com", "./my_analysis", "Statistical Analysis")
-  q.submit_python("owner@org.com", "print('hello')", "Quick Script") 
+  q.submit_python("owner@org.com", "print('hello')", "Quick Script")
   q.submit_bash("owner@org.com", "ls -la", "Directory Listing")
 
 📋 Job Collections:
@@ -624,7 +625,7 @@ def __dir__():
     return [
         # Job submission
         "submit_job",
-        "submit_python", 
+        "submit_python",
         "submit_bash",
         # Job collections
         "pending_for_me",
@@ -641,9 +642,9 @@ def __dir__():
 
 
 # Module-level attribute setter to handle VERBOSE flag changes
-import sys
+
 _this_module = sys.modules[__name__]
-_original_setattr = getattr(_this_module, '__setattr__', None)
+_original_setattr = getattr(_this_module, "__setattr__", None)
 
 
 def _module_setattr(name, value):
@@ -660,7 +661,7 @@ def _module_setattr(name, value):
 
 
 # Replace the module's __setattr__ method
-setattr(_this_module, '__setattr__', _module_setattr)
+setattr(_this_module, "__setattr__", _module_setattr)
 
 
 __version__ = "0.1.26"
@@ -669,7 +670,7 @@ __all__ = [
     "jobs",
     # Object-oriented properties
     "jobs_for_others",
-    "jobs_for_me", 
+    "jobs_for_me",
     "pending_for_me",
     "pending_for_others",
     "my_pending",
@@ -679,7 +680,7 @@ __all__ = [
     # Convenience functions
     "submit_job",
     "submit_python",
-    "submit_bash", 
+    "submit_bash",
     "my_jobs",
     "get_job",
     "get_job_output",
@@ -699,10 +700,10 @@ __all__ = [
     "set_verbose",
     # Lower-level APIs
     "CodeQueueClient",
-    "create_client", 
+    "create_client",
     # Models
     "CodeJob",
-    "JobStatus", 
+    "JobStatus",
     "QueueConfig",
     "JobCollection",
 ]

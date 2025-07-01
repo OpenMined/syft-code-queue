@@ -26,7 +26,7 @@ class JobStatus(str, enum.Enum):
 class CodeJob(BaseModel):
     """
     Represents a code execution job in the queue.
-    
+
     This is a file-backed object - mutable attributes like status, updated_at, etc.
     always read from the current file state rather than cached in-memory values.
     """
@@ -59,41 +59,80 @@ class CodeJob(BaseModel):
 
     # Internal references (private attributes)
     _client: Optional["CodeQueueClient"] = PrivateAttr(default=None)
-    _datasite_path: Optional[Path] = PrivateAttr(default=None)  # Track where this job is actually stored
+    _datasite_path: Optional[Path] = PrivateAttr(
+        default=None
+    )  # Track where this job is actually stored
     _cached_data: Optional[dict] = PrivateAttr(default=None)  # Cache for file data
     _last_reload: Optional[datetime] = PrivateAttr(default=None)  # Track last reload time
-    _file_backed_fields: set[str] = PrivateAttr(default={"status", "updated_at", "started_at", "completed_at", "output_folder", "error_message", "exit_code", "logs"})
+    _file_backed_fields: set[str] = PrivateAttr(
+        default={
+            "status",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "output_folder",
+            "error_message",
+            "exit_code",
+            "logs",
+        }
+    )
 
     def model_post_init(self, __context):
         """Initialize private attributes after model validation."""
         # Ensure private attributes are initialized after model validation
-        if not hasattr(self, '_file_backed_fields') or self._file_backed_fields is None:
-            self._file_backed_fields = {"status", "updated_at", "started_at", "completed_at", "output_folder", "error_message", "exit_code", "logs"}
-        if not hasattr(self, '_client'):
+        if not hasattr(self, "_file_backed_fields") or self._file_backed_fields is None:
+            self._file_backed_fields = {
+                "status",
+                "updated_at",
+                "started_at",
+                "completed_at",
+                "output_folder",
+                "error_message",
+                "exit_code",
+                "logs",
+            }
+        if not hasattr(self, "_client"):
             self._client = None
-        if not hasattr(self, '_datasite_path'):
+        if not hasattr(self, "_datasite_path"):
             self._datasite_path = None
-        if not hasattr(self, '_cached_data'):
+        if not hasattr(self, "_cached_data"):
             self._cached_data = None
-        if not hasattr(self, '_last_reload'):
+        if not hasattr(self, "_last_reload"):
             self._last_reload = None
 
     def __getattribute__(self, name: str):
         """Override attribute access to provide file-backed properties for mutable fields."""
         # Get the actual value first using object.__getattribute__ to avoid recursion
-        if name in ("_file_backed_fields", "_client", "_reload_from_file", "_get_file_backed_value", "model_fields", "model_config", "client"):
+        if name in (
+            "_file_backed_fields",
+            "_client",
+            "_reload_from_file",
+            "_get_file_backed_value",
+            "model_fields",
+            "model_config",
+            "client",
+        ):
             return object.__getattribute__(self, name)
-        
+
         # Check if this is a file-backed field
         # Use a hardcoded list to avoid private attribute access issues
-        file_backed_fields = {"status", "updated_at", "started_at", "completed_at", "output_folder", "error_message", "exit_code", "logs"}
+        file_backed_fields = {
+            "status",
+            "updated_at",
+            "started_at",
+            "completed_at",
+            "output_folder",
+            "error_message",
+            "exit_code",
+            "logs",
+        }
         if name in file_backed_fields:
             try:
                 return self._get_file_backed_value(name)
             except (AttributeError, TypeError):
                 # If file-backed access fails, fall back to normal access
                 pass
-        
+
         # For all other attributes, use normal access
         return object.__getattribute__(self, name)
 
@@ -110,7 +149,7 @@ class CodeJob(BaseModel):
     def _get_file_backed_value(self, field_name: str):
         """Get the current value of a field from file."""
         data = self._reload_from_file()
-        
+
         if field_name == "status":
             status_str = data.get("status", "pending")
             try:
@@ -148,19 +187,21 @@ class CodeJob(BaseModel):
     def _reload_from_file(self, force: bool = False) -> dict:
         """
         Reload job data from the metadata.json file.
-        
+
         Args:
             force: Force reload even if recently cached
-            
+
         Returns:
             Dictionary of job data from file
         """
         # Check if we have a recent cache (within 1 second) and not forcing reload
         now = datetime.now()
-        if (not force and 
-            self._cached_data is not None and 
-            self._last_reload is not None and 
-            (now - self._last_reload).total_seconds() < 1.0):
+        if (
+            not force
+            and self._cached_data is not None
+            and self._last_reload is not None
+            and (now - self._last_reload).total_seconds() < 1.0
+        ):
             return self._cached_data
 
         if self._client is None:
@@ -170,30 +211,29 @@ class CodeJob(BaseModel):
         try:
             # Read job data directly from metadata.json file to avoid circular dependency
             import json
-            from uuid import UUID
-            
+
             # Find the job file using cross-datasite aware search
             job_file = self._client._find_job_file_anywhere(self.uid, self._datasite_path)
             if not job_file or not job_file.exists():
                 return self._get_current_values_dict()
-            
+
             # Update _datasite_path if we found the job in a different location
             if job_file and job_file.exists():
                 # Extract the queue directory from the job file path
                 # job_file format: .../datasite/app_data/code-queue/jobs/status/uid/metadata.json
                 job_file_parts = job_file.parts
-                if len(job_file_parts) >= 4 and 'jobs' in job_file_parts:
-                    jobs_index = job_file_parts.index('jobs')
+                if len(job_file_parts) >= 4 and "jobs" in job_file_parts:
+                    jobs_index = job_file_parts.index("jobs")
                     if jobs_index >= 3:
-                        queue_dir = Path(*job_file_parts[:jobs_index+1])
+                        queue_dir = Path(*job_file_parts[: jobs_index + 1])
                         # Update _datasite_path if it has changed
                         if self._datasite_path != queue_dir:
                             self._datasite_path = queue_dir
-            
+
             # Read raw data from file
             with open(job_file) as f:
                 raw_data = json.load(f)
-            
+
             # Extract the fields we care about for live updates
             data = {
                 "status": raw_data.get("status", "pending"),
@@ -203,15 +243,15 @@ class CodeJob(BaseModel):
                 "output_folder": raw_data.get("output_folder"),
                 "error_message": raw_data.get("error_message"),
                 "exit_code": raw_data.get("exit_code"),
-                "logs": raw_data.get("logs")
+                "logs": raw_data.get("logs"),
             }
-            
+
             # Cache the data
             self._cached_data = data
             self._last_reload = now
-            
+
             return data
-            
+
         except Exception:
             # If reload fails, return current in-memory values
             return self._get_current_values_dict()
@@ -227,16 +267,16 @@ class CodeJob(BaseModel):
         error_message = object.__getattribute__(self, "error_message")
         exit_code = object.__getattribute__(self, "exit_code")
         logs = object.__getattribute__(self, "logs")
-        
+
         return {
-            "status": status.value if hasattr(status, 'value') else str(status),
+            "status": status.value if hasattr(status, "value") else str(status),
             "updated_at": updated_at.isoformat() if updated_at else None,
             "started_at": started_at.isoformat() if started_at else None,
             "completed_at": completed_at.isoformat() if completed_at else None,
             "output_folder": str(output_folder) if output_folder else None,
             "error_message": error_message,
             "exit_code": exit_code,
-            "logs": logs
+            "logs": logs,
         }
 
     def refresh(self) -> "CodeJob":
@@ -250,7 +290,7 @@ class CodeJob(BaseModel):
     def update_status(self, new_status: JobStatus, error_message: Optional[str] = None):
         """Update job status with timestamp and save to file."""
         now = datetime.now()
-        
+
         # Update the model fields directly (using object.__setattr__ to bypass our custom __getattribute__)
         object.__setattr__(self, "status", new_status)
         object.__setattr__(self, "updated_at", now)
@@ -270,7 +310,7 @@ class CodeJob(BaseModel):
             except Exception:
                 # If save fails, we'll still have updated the in-memory values
                 pass
-        
+
         # Invalidate cache so next property access reads fresh data
         self._cached_data = None
         self._last_reload = None
@@ -378,7 +418,7 @@ class CodeJob(BaseModel):
         current_logs = self.logs
         if current_logs is not None:
             return current_logs
-            
+
         # If no logs field, try to get from client
         if self._client is None:
             raise RuntimeError("Job not connected to DataScientist API - cannot get logs")
@@ -424,7 +464,7 @@ class CodeJob(BaseModel):
         """Show interactive filesystem UI for code review."""
         if self._client is None:
             raise RuntimeError("Job not connected to DataOwner API - cannot review")
-        
+
         # Return the interactive filesystem widget
         return FilesystemReviewWidget(self)
 
@@ -433,7 +473,7 @@ class CodeJob(BaseModel):
         """Show interactive filesystem UI for viewing job output files."""
         if self._client is None:
             raise RuntimeError("Job not connected to API - cannot view output")
-        
+
         # Return the interactive output viewer widget
         return OutputViewerWidget(self)
 
@@ -597,8 +637,9 @@ class CodeJob(BaseModel):
 
         # Add unique timestamp to prevent Jupyter caching
         import time
+
         timestamp = str(int(time.time() * 1000))
-        
+
         html_content = f"""
     <div class="syft-job-container">
 
@@ -855,7 +896,7 @@ class CodeJob(BaseModel):
 
     </div>
     """
-        
+
         # Add unique comment to force Jupyter to treat this as new content
         return f"<!-- refresh-{timestamp}-{self.uid} -->\n{html_content}"
 
@@ -1137,7 +1178,7 @@ class JobCollection(list[CodeJob]):
         .syft-jobs-table tr.syft-selected {{
             background-color: #eff6ff;
         }}
-        
+
         /* Column width allocation */
         .syft-jobs-table th:nth-child(1), .syft-jobs-table td:nth-child(1) {{ width: 40px; }} /* Checkbox */
         .syft-jobs-table th:nth-child(2), .syft-jobs-table td:nth-child(2) {{ width: 30%; }} /* Job Name */
@@ -1147,7 +1188,7 @@ class JobCollection(list[CodeJob]):
         .syft-jobs-table th:nth-child(6), .syft-jobs-table td:nth-child(6) {{ width: 15%; }} /* Tags */
         .syft-jobs-table th:nth-child(7), .syft-jobs-table td:nth-child(7) {{ width: 70px; }} /* ID */
         .syft-jobs-table th:nth-child(8), .syft-jobs-table td:nth-child(8) {{ width: 100px; }} /* Actions */
-        
+
         .syft-job-name {{
             font-weight: 600;
             color: #111827;
@@ -1194,7 +1235,7 @@ class JobCollection(list[CodeJob]):
             font-weight: 500;
             white-space: nowrap;
         }}
-        
+
         /* Responsive design for narrow screens */
         @media (max-width: 1200px) {{
             .syft-jobs-table th:nth-child(6), .syft-jobs-table td:nth-child(6) {{ display: none; }} /* Hide Tags */
@@ -1315,16 +1356,16 @@ class JobCollection(list[CodeJob]):
         # Add batch approval buttons only if any jobs can be approved by the current user
         # (i.e., jobs submitted TO me that are pending, not jobs I submitted to others)
         current_user_email = None
-        if self and hasattr(self[0], '_client') and self[0]._client:
+        if self and hasattr(self[0], "_client") and self[0]._client:
             current_user_email = self[0]._client.syftbox_client.email
-        
+
         can_approve_any = any(
-            job.status == JobStatus.pending and 
-            job._client is not None and
-            job.target_email == current_user_email
+            job.status == JobStatus.pending
+            and job._client is not None
+            and job.target_email == current_user_email
             for job in self
         )
-        
+
         if can_approve_any:
             html_content += f"""
                 <button class="syft-batch-btn" onclick="batchApprove('{container_id}')">Approve Selected</button>
@@ -1380,15 +1421,12 @@ class JobCollection(list[CodeJob]):
             # Build action buttons - pass index and collection type
             # Determine if this job can be approved by current user
             can_approve_job = (
-                job.status == JobStatus.pending and 
-                job._client is not None and
-                job.target_email == current_user_email
+                job.status == JobStatus.pending
+                and job._client is not None
+                and job.target_email == current_user_email
             )
-            
-            collection_name = (
-                "pending_for_me" if can_approve_job else "jobs_for_others"
-            )
-            
+
+
             actions_html = ""
             if can_approve_job:
                 # Jobs I can approve (submitted TO me)
@@ -1520,19 +1558,19 @@ class JobCollection(list[CodeJob]):
              const table = document.querySelector(`#${{containerId}} .syft-jobs-table tbody`);
              const rows = table.querySelectorAll('tr');
              const selectedUids = [];
-             
+
              rows.forEach((row, index) => {{
                  const checkbox = row.querySelector('input[type="checkbox"]');
                  if (checkbox && checkbox.checked && row.style.display !== 'none') {{
                      const jobUid = row.getAttribute('data-job-uid'); if (jobUid) {{ selectedUids.push(jobUid); }}
                  }}
              }});
-             
+
              if (selectedUids.length === 0) {{
                  alert('Please select jobs to approve first.');
                  return;
              }}
-             
+
              const reason = prompt(`Approval reason for ${{selectedUids.length}} selected job(s):`, "Batch approved via Jupyter interface");
              if (reason !== null) {{
                  let code = 'import syft_code_queue as q\\n';
@@ -1567,19 +1605,19 @@ class JobCollection(list[CodeJob]):
              const table = document.querySelector(`#${{containerId}} .syft-jobs-table tbody`);
              const rows = table.querySelectorAll('tr');
              const selectedUids = [];
-             
+
              rows.forEach((row, index) => {{
                  const checkbox = row.querySelector('input[type="checkbox"]');
                  if (checkbox && checkbox.checked && row.style.display !== 'none') {{
                      const jobUid = row.getAttribute('data-job-uid'); if (jobUid) {{ selectedUids.push(jobUid); }}
                  }}
              }});
-             
+
              if (selectedUids.length === 0) {{
                  alert('Please select jobs to reject first.');
                  return;
              }}
-             
+
              const reason = prompt(`Rejection reason for ${{selectedUids.length}} selected job(s):`, "Batch rejected via Jupyter interface");
              if (reason !== null && reason.trim() !== "") {{
                  let code = 'import syft_code_queue as q\\n';
@@ -1829,9 +1867,10 @@ class JobCollection(list[CodeJob]):
 
         # Add unique timestamp to prevent Jupyter caching
         import time
+
         timestamp = str(int(time.time() * 1000))
         collection_id = hash(str([job.uid for job in self])) % 10000
-        
+
         # Add unique comment to force Jupyter to treat this as new content
         return f"<!-- refresh-{timestamp}-collection-{collection_id} -->\n{html_content}"
 
@@ -1874,24 +1913,25 @@ class QueueConfig(BaseModel):
 
 class FilesystemReviewWidget:
     """Interactive filesystem widget for code review in Jupyter."""
-    
+
     def __init__(self, job: "CodeJob"):
         self.job = job
-    
+
     def _repr_html_(self):
         """Return HTML for Jupyter display."""
         # Always regenerate HTML to ensure fresh content for each job
         # Add unique timestamp to prevent Jupyter caching
         import time
+
         timestamp = str(int(time.time() * 1000))
         html = self._create_filesystem_ui()
         # Add unique comment to force Jupyter to treat this as new content
         return f"<!-- refresh-{timestamp}-{self.job.uid} -->\n{html}"
-    
+
     def _create_filesystem_ui(self):
         """Create the interactive filesystem UI."""
         import html
-        
+
         # Get file list
         try:
             files = self.job.list_files()
@@ -1902,36 +1942,36 @@ class FilesystemReviewWidget:
                 <p>Error: {html.escape(str(e))}</p>
             </div>
             """
-        
+
         if not files:
-            return f"""
+            return """
             <div style="padding: 20px; color: #6c757d; border: 1px solid #dee2e6; border-radius: 8px; background: #f8f9fa;">
                 <h3>📁 No files found</h3>
                 <p>This job appears to have no files to review.</p>
             </div>
             """
-        
+
         # Sort files - executables first, then alphabetically
         def sort_key(filename):
-            is_executable = filename in ['run.sh', 'run.py', 'run.bash']
+            is_executable = filename in ["run.sh", "run.py", "run.bash"]
             return (not is_executable, filename.lower())
-        
+
         sorted_files = sorted(files, key=sort_key)
-        
+
         # Build file list HTML
         files_html = ""
         for i, filename in enumerate(sorted_files):
             icon = self._get_file_type(filename)
-            is_executable = filename in ['run.sh', 'run.py', 'run.bash']
+            is_executable = filename in ["run.sh", "run.py", "run.bash"]
             file_class = "file-executable" if is_executable else "file-regular"
-            
+
             files_html += f"""
                 <div class="file-item {file_class}" onclick="loadFileReview('{filename}')" data-filename="{filename}">
                     <span class="file-icon">{icon}</span>
                     <span class="file-name">{html.escape(filename)}</span>
                 </div>
             """
-        
+
         # Pre-load all file contents for the JavaScript
         file_contents = {}
         for filename in sorted_files:
@@ -1943,17 +1983,18 @@ class FilesystemReviewWidget:
                     file_contents[filename] = "❌ Could not read file content"
             except Exception as e:
                 file_contents[filename] = f"❌ Error reading file: {str(e)}"
-        
+
         # Get first file content for initial display
         first_file = sorted_files[0] if sorted_files else None
         initial_content = ""
         if first_file and first_file in file_contents:
             initial_content = html.escape(file_contents[first_file])
-        
+
         # Convert file contents to JavaScript object
         import json
+
         file_contents_js = json.dumps(file_contents)
-        
+
         return f"""
         <div class="filesystem-review-container">
             <style>
@@ -1966,7 +2007,7 @@ class FilesystemReviewWidget:
                 margin: 16px 0;
                 box-shadow: 0 8px 32px rgba(0,0,0,0.1);
             }}
-            
+
             .review-header {{
                 padding: 20px 24px;
                 color: white;
@@ -1974,7 +2015,7 @@ class FilesystemReviewWidget:
                 backdrop-filter: blur(10px);
                 border-bottom: 1px solid rgba(255,255,255,0.2);
             }}
-            
+
             .review-title {{
                 font-size: 20px;
                 font-weight: 700;
@@ -1983,7 +2024,7 @@ class FilesystemReviewWidget:
                 align-items: center;
                 gap: 12px;
             }}
-            
+
             .review-meta {{
                 font-size: 14px;
                 opacity: 0.9;
@@ -1992,20 +2033,20 @@ class FilesystemReviewWidget:
                 gap: 16px;
                 margin: 8px 0 0 0;
             }}
-            
+
             .review-content {{
                 display: flex;
                 height: 500px;
                 background: white;
             }}
-            
+
             .file-list {{
                 width: 280px;
                 border-right: 1px solid #e1e5e9;
                 background: #f8fafc;
                 overflow-y: auto;
             }}
-            
+
             .file-list-header {{
                 padding: 16px;
                 background: #f1f5f9;
@@ -2014,7 +2055,7 @@ class FilesystemReviewWidget:
                 color: #475569;
                 font-size: 14px;
             }}
-            
+
             .file-item {{
                 padding: 12px 16px;
                 cursor: pointer;
@@ -2024,46 +2065,46 @@ class FilesystemReviewWidget:
                 border-bottom: 1px solid #f1f5f9;
                 transition: all 0.2s ease;
             }}
-            
+
             .file-item:hover {{
                 background: #e2e8f0;
             }}
-            
+
             .file-item.active {{
                 background: #3b82f6;
                 color: white;
             }}
-            
+
             .file-item.file-executable {{
                 background: linear-gradient(90deg, #fef3c7, #fef3c7);
                 border-left: 4px solid #f59e0b;
             }}
-            
+
             .file-item.file-executable:hover {{
                 background: linear-gradient(90deg, #fde68a, #fde68a);
             }}
-            
+
             .file-item.file-executable.active {{
                 background: #f59e0b;
                 color: white;
             }}
-            
+
             .file-icon {{
                 font-size: 16px;
                 min-width: 20px;
             }}
-            
+
             .file-name {{
                 font-size: 14px;
                 font-weight: 500;
             }}
-            
+
             .content-viewer {{
                 flex: 1;
                 display: flex;
                 flex-direction: column;
             }}
-            
+
             .content-header {{
                 padding: 16px 20px;
                 background: #f8fafc;
@@ -2072,24 +2113,24 @@ class FilesystemReviewWidget:
                 justify-content: space-between;
                 align-items: center;
             }}
-            
+
             .content-title {{
                 font-weight: 600;
                 color: #1e293b;
                 font-size: 14px;
             }}
-            
+
             .content-meta {{
                 font-size: 12px;
                 color: #64748b;
             }}
-            
+
             .content-body {{
                 flex: 1;
                 overflow: auto;
                 padding: 0;
             }}
-            
+
             .content-code {{
                 padding: 20px;
                 font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
@@ -2102,7 +2143,7 @@ class FilesystemReviewWidget:
                 border: none;
                 min-height: 100%;
             }}
-            
+
             .action-buttons {{
                 padding: 16px 20px;
                 background: #f8fafc;
@@ -2111,7 +2152,7 @@ class FilesystemReviewWidget:
                 gap: 12px;
                 justify-content: center;
             }}
-            
+
             .action-btn {{
                 padding: 10px 20px;
                 border: none;
@@ -2124,34 +2165,34 @@ class FilesystemReviewWidget:
                 align-items: center;
                 gap: 8px;
             }}
-            
+
             .action-btn.approve {{
                 background: linear-gradient(135deg, #10b981, #059669);
                 color: white;
             }}
-            
+
             .action-btn.approve:hover {{
                 background: linear-gradient(135deg, #059669, #047857);
                 transform: translateY(-1px);
             }}
-            
+
             .action-btn.reject {{
                 background: linear-gradient(135deg, #ef4444, #dc2626);
                 color: white;
             }}
-            
+
             .action-btn.reject:hover {{
                 background: linear-gradient(135deg, #dc2626, #b91c1c);
                 transform: translateY(-1px);
             }}
-            
+
             .loading {{
                 padding: 40px;
                 text-align: center;
                 color: #64748b;
             }}
             </style>
-            
+
             <div class="review-header">
                 <div class="review-title">
                     🔍 Code Review: {html.escape(self.job.name)}
@@ -2159,19 +2200,19 @@ class FilesystemReviewWidget:
                 </div>
                 <div class="review-meta">
                     📧 {html.escape(self.job.requester_email)} → {html.escape(self.job.target_email)}
-                    • 🏷️ {', '.join(self.job.tags) if self.job.tags else 'No tags'}
+                    • 🏷️ {", ".join(self.job.tags) if self.job.tags else "No tags"}
                 </div>
             </div>
-            
+
             <div class="review-content">
                 <div class="file-list">
                     <div class="file-list-header">📁 Files ({len(files)})</div>
                     {files_html}
                 </div>
-                
+
                 <div class="content-viewer">
                     <div class="content-header">
-                        <div class="content-title" id="current-file">{html.escape(first_file) if first_file else 'No file selected'}</div>
+                        <div class="content-title" id="current-file">{html.escape(first_file) if first_file else "No file selected"}</div>
                         <div class="content-meta" id="file-meta"></div>
                     </div>
                     <div class="content-body">
@@ -2179,41 +2220,41 @@ class FilesystemReviewWidget:
                     </div>
                 </div>
             </div>
-            
+
             <div class="action-buttons">
                 {self._get_action_buttons_html()}
             </div>
         </div>
-        
+
         <script>
         let currentJobUid = '{self.job.uid}';
         let jobFiles = {sorted_files};
         let fileContents = {file_contents_js};
-        
+
         function loadFileReview(filename) {{
             console.log('loadFileReview called with filename:', filename);
             console.log('fileContents object:', fileContents);
             console.log('Available keys:', Object.keys(fileContents));
-            
+
             // Update active file styling
             document.querySelectorAll('.file-item').forEach(item => {{
                 item.classList.remove('active');
             }});
             document.querySelector(`[data-filename="${{filename}}"]`).classList.add('active');
-            
+
             // Update header
             document.getElementById('current-file').textContent = filename;
-            
+
             // Get file content from pre-loaded data
             let content = fileContents[filename];
             console.log('Content for', filename, ':', content);
             console.log('Content exists:', !!content);
             console.log('Content type:', typeof content);
-            
+
             if (content) {{
                 // Display the actual file content
                 document.getElementById('file-content').textContent = content;
-                
+
                 // Update metadata
                 let lines = content.split('\\n').length;
                 let chars = content.length;
@@ -2225,7 +2266,7 @@ class FilesystemReviewWidget:
                 console.log('ERROR: No content found for', filename);
             }}
         }}
-        
+
         function approveJobReview(jobUid) {{
             let reason = prompt('Approval reason (optional):', 'Code review completed - approved');
             if (reason !== null) {{
@@ -2242,7 +2283,7 @@ if job:
         print('❌ Failed to approve job')
 else:
     print('❌ Job not found')`;
-                
+
                 navigator.clipboard.writeText(code.trim()).then(() => {{
                     alert('✅ Approval code copied to clipboard!\\n\\nPaste and run in a new cell to approve the job.');
                 }}).catch(() => {{
@@ -2250,7 +2291,7 @@ else:
                 }});
             }}
         }}
-        
+
         function rejectJobReview(jobUid) {{
             let reason = prompt('Rejection reason:', '');
             if (reason !== null && reason.trim() !== '') {{
@@ -2267,7 +2308,7 @@ if job:
         print('❌ Failed to reject job')
 else:
     print('❌ Job not found')`;
-                
+
                 navigator.clipboard.writeText(code.trim()).then(() => {{
                     alert('🚫 Rejection code copied to clipboard!\\n\\nPaste and run in a new cell to reject the job.');
                 }}).catch(() => {{
@@ -2275,18 +2316,18 @@ else:
                 }});
             }}
         }}
-        
+
         // Initialize first file as active
         console.log('Initializing filesystem review widget');
         console.log('jobFiles:', jobFiles);
         console.log('fileContents keys:', Object.keys(fileContents));
         console.log('fileContents values lengths:', Object.keys(fileContents).map(k => k + ': ' + fileContents[k].length + ' chars'));
-        
+
         if (jobFiles.length > 0) {{
             let firstFile = jobFiles[0];
             console.log('Setting first file as active:', firstFile);
             document.querySelector(`[data-filename="${{firstFile}}"]`).classList.add('active');
-            
+
             // Show metadata for the first file
             let firstContent = fileContents[firstFile];
             if (firstContent) {{
@@ -2302,20 +2343,20 @@ else:
         }}
         </script>
         """
-    
+
     def _get_action_buttons_html(self) -> str:
         """Get HTML for action buttons based on user permissions."""
         # Check if current user can approve this job
         current_user_email = None
         if self.job._client:
             current_user_email = self.job._client.syftbox_client.email
-        
+
         can_approve = (
-            self.job.status == JobStatus.pending and
-            self.job._client is not None and
-            self.job.target_email == current_user_email
+            self.job.status == JobStatus.pending
+            and self.job._client is not None
+            and self.job.target_email == current_user_email
         )
-        
+
         if can_approve:
             # User can approve - show approve/reject buttons
             return f"""
@@ -2332,7 +2373,7 @@ else:
                 status_msg = f"Job status: {self.job.status.value}"
             else:
                 status_msg = "Awaiting approval from job recipient"
-            
+
             return f"""
                 <div style="text-align: center; padding: 16px; color: #64748b; font-style: italic;">
                     📋 Review only • {status_msg}
@@ -2341,48 +2382,49 @@ else:
 
     def _get_file_type(self, filename: str) -> str:
         """Get emoji icon for file type."""
-        if filename.endswith('.py'):
-            return '🐍'
-        elif filename.endswith(('.sh', '.bash')):
-            return '💻'
-        elif filename.endswith(('.txt', '.md')):
-            return '📝'
-        elif filename.endswith(('.yml', '.yaml')):
-            return '⚙️'
-        elif filename.endswith('.json'):
-            return '📋'
-        elif filename.endswith(('.csv', '.tsv')):
-            return '📊'
-        elif filename in ['requirements.txt', 'pyproject.toml', 'setup.py']:
-            return '📦'
-        elif filename in ['Dockerfile', 'docker-compose.yml']:
-            return '🐳'
-        elif filename.startswith('run.'):
-            return '🚀'
+        if filename.endswith(".py"):
+            return "🐍"
+        elif filename.endswith((".sh", ".bash")):
+            return "💻"
+        elif filename.endswith((".txt", ".md")):
+            return "📝"
+        elif filename.endswith((".yml", ".yaml")):
+            return "⚙️"
+        elif filename.endswith(".json"):
+            return "📋"
+        elif filename.endswith((".csv", ".tsv")):
+            return "📊"
+        elif filename in ["requirements.txt", "pyproject.toml", "setup.py"]:
+            return "📦"
+        elif filename in ["Dockerfile", "docker-compose.yml"]:
+            return "🐳"
+        elif filename.startswith("run."):
+            return "🚀"
         else:
-            return '📄'
+            return "📄"
 
 
 class OutputViewerWidget:
     """Interactive output filesystem widget for viewing job results in Jupyter."""
-    
+
     def __init__(self, job: "CodeJob"):
         self.job = job
-    
+
     def _repr_html_(self):
         """Return HTML for Jupyter display."""
         # Always regenerate HTML to ensure fresh content for each job
         # Add unique timestamp to prevent Jupyter caching
         import time
+
         timestamp = str(int(time.time() * 1000))
         html = self._create_output_ui()
         # Add unique comment to force Jupyter to treat this as new content
         return f"<!-- refresh-{timestamp}-{self.job.uid} -->\n{html}"
-    
+
     def _create_output_ui(self):
         """Create the interactive output filesystem UI."""
         import html
-        
+
         # Check if job has output folder
         if not self.job.output_folder:
             return f"""
@@ -2392,7 +2434,7 @@ class OutputViewerWidget:
                 <p><strong>Job Status:</strong> {self.job.status.value}</p>
             </div>
             """
-        
+
         # Get file list
         try:
             files = self.job.list_output_files()
@@ -2404,7 +2446,7 @@ class OutputViewerWidget:
                 <p><strong>Output Path:</strong> {html.escape(str(self.job.output_folder))}</p>
             </div>
             """
-        
+
         if not files:
             return f"""
             <div style="padding: 20px; color: #6c757d; border: 1px solid #dee2e6; border-radius: 8px; background: #f8f9fa;">
@@ -2414,10 +2456,10 @@ class OutputViewerWidget:
                 <p><strong>Job Status:</strong> {self.job.status.value}</p>
             </div>
             """
-        
+
         # Sort files alphabetically
         sorted_files = sorted(files)
-        
+
         # Build file list HTML
         files_html = ""
         for filename in sorted_files:
@@ -2428,7 +2470,7 @@ class OutputViewerWidget:
                     <span class="file-name">{html.escape(filename)}</span>
                 </div>
             """
-        
+
         # Pre-load all file contents for the JavaScript
         file_contents = {}
         for filename in sorted_files:
@@ -2440,17 +2482,18 @@ class OutputViewerWidget:
                     file_contents[filename] = "❌ Could not read file content"
             except Exception as e:
                 file_contents[filename] = f"❌ Error reading file: {str(e)}"
-        
+
         # Get first file content for initial display
         first_file = sorted_files[0] if sorted_files else None
         initial_content = ""
         if first_file and first_file in file_contents:
             initial_content = html.escape(file_contents[first_file])
-        
+
         # Convert file contents to JavaScript object
         import json
+
         file_contents_js = json.dumps(file_contents)
-        
+
         return f"""
         <div class="output-viewer-container">
             <style>
@@ -2463,7 +2506,7 @@ class OutputViewerWidget:
                 margin: 16px 0;
                 box-shadow: 0 8px 32px rgba(0,0,0,0.1);
             }}
-            
+
             .output-header {{
                 padding: 20px 24px;
                 color: white;
@@ -2471,7 +2514,7 @@ class OutputViewerWidget:
                 backdrop-filter: blur(10px);
                 border-bottom: 1px solid rgba(255,255,255,0.2);
             }}
-            
+
             .output-title {{
                 font-size: 20px;
                 font-weight: 700;
@@ -2480,7 +2523,7 @@ class OutputViewerWidget:
                 align-items: center;
                 gap: 12px;
             }}
-            
+
             .output-meta {{
                 font-size: 14px;
                 opacity: 0.9;
@@ -2489,20 +2532,20 @@ class OutputViewerWidget:
                 gap: 16px;
                 margin: 8px 0 0 0;
             }}
-            
+
             .output-content {{
                 display: flex;
                 height: 500px;
                 background: white;
             }}
-            
+
             .file-list {{
                 width: 280px;
                 border-right: 1px solid #e1e5e9;
                 background: #f8fafc;
                 overflow-y: auto;
             }}
-            
+
             .file-list-header {{
                 padding: 16px;
                 background: #f1f5f9;
@@ -2511,7 +2554,7 @@ class OutputViewerWidget:
                 color: #475569;
                 font-size: 14px;
             }}
-            
+
             .file-item {{
                 padding: 12px 16px;
                 cursor: pointer;
@@ -2521,32 +2564,32 @@ class OutputViewerWidget:
                 border-bottom: 1px solid #f1f5f9;
                 transition: all 0.2s ease;
             }}
-            
+
             .file-item:hover {{
                 background: #e2e8f0;
             }}
-            
+
             .file-item.active {{
                 background: #3b82f6;
                 color: white;
             }}
-            
+
             .file-icon {{
                 font-size: 16px;
                 min-width: 20px;
             }}
-            
+
             .file-name {{
                 font-size: 14px;
                 font-weight: 500;
             }}
-            
+
             .content-viewer {{
                 flex: 1;
                 display: flex;
                 flex-direction: column;
             }}
-            
+
             .content-header {{
                 padding: 16px 20px;
                 background: #f8fafc;
@@ -2555,24 +2598,24 @@ class OutputViewerWidget:
                 justify-content: space-between;
                 align-items: center;
             }}
-            
+
             .content-title {{
                 font-weight: 600;
                 color: #1e293b;
                 font-size: 14px;
             }}
-            
+
             .content-meta {{
                 font-size: 12px;
                 color: #64748b;
             }}
-            
+
             .content-body {{
                 flex: 1;
                 overflow: auto;
                 padding: 0;
             }}
-            
+
             .content-code {{
                 padding: 20px;
                 font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
@@ -2586,7 +2629,7 @@ class OutputViewerWidget:
                 min-height: 100%;
             }}
             </style>
-            
+
             <div class="output-header">
                 <div class="output-title">
                     📁 Job Output: {html.escape(self.job.name)}
@@ -2597,16 +2640,16 @@ class OutputViewerWidget:
                     • Status: {self.job.status.value}
                 </div>
             </div>
-            
+
             <div class="output-content">
                 <div class="file-list">
                     <div class="file-list-header">📄 Output Files ({len(files)})</div>
                     {files_html}
                 </div>
-                
+
                 <div class="content-viewer">
                     <div class="content-header">
-                        <div class="content-title" id="current-output-file">{html.escape(first_file) if first_file else 'No file selected'}</div>
+                        <div class="content-title" id="current-output-file">{html.escape(first_file) if first_file else "No file selected"}</div>
                         <div class="content-meta" id="output-file-meta"></div>
                     </div>
                     <div class="content-body">
@@ -2615,31 +2658,31 @@ class OutputViewerWidget:
                 </div>
             </div>
         </div>
-        
+
         <script>
         let outputJobUid = '{self.job.uid}';
         let outputFiles = {json.dumps(sorted_files)};
         let outputFileContents = {file_contents_js};
-        
+
         function loadOutputFile(filename) {{
             console.log('loadOutputFile called with filename:', filename);
-            
+
             // Update active file styling
             document.querySelectorAll('.file-item').forEach(item => {{
                 item.classList.remove('active');
             }});
             document.querySelector(`[data-filename="${{filename}}"]`).classList.add('active');
-            
+
             // Update header
             document.getElementById('current-output-file').textContent = filename;
-            
+
             // Get file content from pre-loaded data
             let content = outputFileContents[filename];
-            
+
             if (content) {{
                 // Display the actual file content
                 document.getElementById('output-file-content').textContent = content;
-                
+
                 // Update metadata
                 let lines = content.split('\\n').length;
                 let chars = content.length;
@@ -2649,12 +2692,12 @@ class OutputViewerWidget:
                 document.getElementById('output-file-meta').textContent = 'Content not loaded';
             }}
         }}
-        
+
         // Initialize first file as active
         if (outputFiles.length > 0) {{
             let firstFile = outputFiles[0];
             document.querySelector(`[data-filename="${{firstFile}}"]`).classList.add('active');
-            
+
             // Show metadata for the first file
             let firstContent = outputFileContents[firstFile];
             if (firstContent) {{
@@ -2668,31 +2711,31 @@ class OutputViewerWidget:
 
     def _get_file_type(self, filename: str) -> str:
         """Get emoji icon for file type."""
-        if filename.endswith('.py'):
-            return '🐍'
-        elif filename.endswith(('.sh', '.bash')):
-            return '💻'
-        elif filename.endswith(('.txt', '.md')):
-            return '📝'
-        elif filename.endswith(('.yml', '.yaml')):
-            return '⚙️'
-        elif filename.endswith('.json'):
-            return '📋'
-        elif filename.endswith(('.csv', '.tsv')):
-            return '📊'
-        elif filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg')):
-            return '🖼️'
-        elif filename.endswith(('.pdf')):
-            return '📄'
-        elif filename.endswith(('.log')):
-            return '📜'
-        elif filename.endswith(('.html', '.htm')):
-            return '🌐'
-        elif filename.endswith(('.xml')):
-            return '📋'
-        elif filename.startswith('output'):
-            return '📤'
-        elif filename.startswith('result'):
-            return '🎯'
+        if filename.endswith(".py"):
+            return "🐍"
+        elif filename.endswith((".sh", ".bash")):
+            return "💻"
+        elif filename.endswith((".txt", ".md")):
+            return "📝"
+        elif filename.endswith((".yml", ".yaml")):
+            return "⚙️"
+        elif filename.endswith(".json"):
+            return "📋"
+        elif filename.endswith((".csv", ".tsv")):
+            return "📊"
+        elif filename.endswith((".png", ".jpg", ".jpeg", ".gif", ".svg")):
+            return "🖼️"
+        elif filename.endswith(".pdf"):
+            return "📄"
+        elif filename.endswith(".log"):
+            return "📜"
+        elif filename.endswith((".html", ".htm")):
+            return "🌐"
+        elif filename.endswith(".xml"):
+            return "📋"
+        elif filename.startswith("output"):
+            return "📤"
+        elif filename.startswith("result"):
+            return "🎯"
         else:
-            return '📄'
+            return "📄"

@@ -916,7 +916,7 @@ wheels = [
 
 [[package]]
 name = "syft-code-queue"
-version = "0.1.1"
+version = "0.1.23"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -924,6 +924,7 @@ dependencies = [
     { name = "pathlib" },
     { name = "pydantic" },
     { name = "syft-core" },
+    { name = "syft-perm" },
     { name = "tabulate" },
 ]
 
@@ -947,6 +948,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "syft-core" },
+    { name = "syft-perm", specifier = ">=0.1.0" },
     { name = "tabulate", specifier = ">=0.9.0" },
     { name = "twine", marker = "extra == 'dev'" },
 ]
@@ -964,6 +966,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/82/6d/d7768967c367b4d4cdaf4e247c6ab76950fe81a8780d265d13a3a908efd0/syft_core-0.2.5.tar.gz", hash = "sha256:461c4f8d09ed4d9aad7d228e137bab772b194a91d6f36b4b8be2eda4b57fee85", size = 15997 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4a/bc/c87e40c811ec74f9040e3d481690b18dcd65c77acd705a7f2f987e1bc9a9/syft_core-0.2.5-py3-none-any.whl", hash = "sha256:24127e34471e4b8e5b095b98f5b2a42140a2ba420196af2fa2b3574e39ce9718", size = 14346 },
+]
+
+[[package]]
+name = "syft-perm"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/07/5daa6aac78a0e0a536c886deb3a70ea66371f877855782737e35f4bfaa5d/syft_perm-0.1.0.tar.gz", hash = "sha256:8685200617c8ca956689e17ad56e33df5811531e1f40343ee39d0fcae5579ab7", size = 5233 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0f/88/a3d6094761ecdd9d5f222a1dfd3e187203ce735c54fc4b970f44c9475131/syft_perm-0.1.0-py3-none-any.whl", hash = "sha256:48e18ef2744b212c7e46f27e55667772441f915e4a54cdf5743bfab2a5a662c0", size = 3982 },
 ]
 
 [[package]]

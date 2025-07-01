@@ -9,25 +9,23 @@ from typing import Optional, Union
 from uuid import UUID
 
 from loguru import logger
-
 from syft_core import Client as SyftBoxClient
-from .models import CodeJob, JobCreate, JobStatus, QueueConfig
 
 # Import syft-perm for permission management (required)
-
 from syft_perm import set_file_permissions
 
+from .models import CodeJob, JobCreate, JobStatus, QueueConfig
 
 
 class CodeQueueClient:
     """
     Client for interacting with the code queue.
-    
+
     Cross-Datasite Workflow:
     1. Job Creation: When a job is submitted, it gets stored in the TARGET's datasite "pending" folder
     2. Job Review: When someone approves/rejects a job, it moves within THEIR own datasite
        (from "pending" to "approved"/"rejected" folder in the reviewer's datasite)
-    3. Job Discovery: 
+    3. Job Discovery:
        - list_all_jobs() finds jobs submitted TO you (in your local datasite)
        - list_my_jobs() finds jobs submitted BY you (searches across all datasites)
     """
@@ -40,22 +38,24 @@ class CodeQueueClient:
 
         # Create status directories with proper permissions
         logger.debug(f"Initializing syft-code-queue for {self.email}")
-        
+
         for status in JobStatus:
             status_dir = self._get_status_dir(status)
             try:
                 status_dir.mkdir(parents=True, exist_ok=True)
                 logger.debug(f"Created status directory: {status_dir}")
-                
+
                 # Create syft.pub.yaml files for all status directories
                 if status == JobStatus.pending:
                     # Pending directory gets read/write permissions for cross-datasite job submission
                     self._create_pending_syftperm(status_dir)
-                    logger.info(f"Initialized pending directory with cross-datasite permissions: {status_dir}")
+                    logger.info(
+                        f"Initialized pending directory with cross-datasite permissions: {status_dir}"
+                    )
                 else:
                     # All other directories get read-only permissions for cross-datasite visibility
                     self._create_readonly_syftperm(status_dir, status.value)
-                    
+
             except Exception as e:
                 logger.error(f"Failed to initialize status directory {status_dir}: {e}")
                 # Don't fail completely - try to continue with other directories
@@ -72,11 +72,11 @@ class CodeQueueClient:
     def _get_queue_dir(self) -> Path:
         """Get the local queue directory."""
         return self.syftbox_client.app_data(self.queue_name) / "jobs"
-    
+
     def _create_pending_syftperm(self, pending_dir: Path):
         """Create syft.pub.yaml file for pending directory to allow cross-datasite writes."""
         syftperm_file = pending_dir / "syft.pub.yaml"
-        
+
         # Required syft.pub.yaml content for cross-datasite writes
         required_syftperm_content = """rules:
 - pattern: '**'
@@ -86,11 +86,11 @@ class CodeQueueClient:
     write:
     - '*'
 """
-        
+
         try:
             # Always ensure the pending directory exists
             pending_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Check if syft.pub.yaml file exists and has correct content
             needs_creation = True
             if syftperm_file.exists():
@@ -101,16 +101,22 @@ class CodeQueueClient:
                         needs_creation = False
                         logger.debug(f"Correct syft.pub.yaml file already exists in {pending_dir}")
                     else:
-                        logger.info(f"Updating syft.pub.yaml file in {pending_dir} with correct permissions")
+                        logger.info(
+                            f"Updating syft.pub.yaml file in {pending_dir} with correct permissions"
+                        )
                 except Exception as e:
-                    logger.warning(f"Could not read existing syft.pub.yaml file in {pending_dir}: {e}")
-            
+                    logger.warning(
+                        f"Could not read existing syft.pub.yaml file in {pending_dir}: {e}"
+                    )
+
             # Create or update the syft.pub.yaml file if needed
             if needs_creation:
-                with open(syftperm_file, 'w') as f:
+                with open(syftperm_file, "w") as f:
                     f.write(required_syftperm_content)
-                logger.info(f"Created/updated syft.pub.yaml file for pending directory: {pending_dir}")
-                
+                logger.info(
+                    f"Created/updated syft.pub.yaml file for pending directory: {pending_dir}"
+                )
+
         except PermissionError as e:
             logger.error(f"Permission denied creating syft.pub.yaml file in {pending_dir}: {e}")
             raise RuntimeError(f"Cannot create syft.pub.yaml file - insufficient permissions: {e}")
@@ -121,7 +127,7 @@ class CodeQueueClient:
     def _create_readonly_syftperm(self, status_dir: Path, status_name: str):
         """Create read-only syft.pub.yaml file for status directories."""
         syftperm_file = status_dir / "syft.pub.yaml"
-        
+
         # Required syft.pub.yaml content for read-only access
         required_syftperm_content = """rules:
 - pattern: '**'
@@ -129,11 +135,11 @@ class CodeQueueClient:
     read:
     - '*'
 """
-        
+
         try:
             # Always ensure the status directory exists
             status_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Check if syft.pub.yaml file exists and has correct content
             needs_creation = True
             if syftperm_file.exists():
@@ -142,18 +148,26 @@ class CodeQueueClient:
                     required_content = required_syftperm_content.strip()
                     if existing_content == required_content:
                         needs_creation = False
-                        logger.debug(f"Correct read-only syft.pub.yaml file already exists in {status_dir}")
+                        logger.debug(
+                            f"Correct read-only syft.pub.yaml file already exists in {status_dir}"
+                        )
                     else:
-                        logger.info(f"Updating syft.pub.yaml file in {status_dir} with read-only permissions")
+                        logger.info(
+                            f"Updating syft.pub.yaml file in {status_dir} with read-only permissions"
+                        )
                 except Exception as e:
-                    logger.warning(f"Could not read existing syft.pub.yaml file in {status_dir}: {e}")
-            
+                    logger.warning(
+                        f"Could not read existing syft.pub.yaml file in {status_dir}: {e}"
+                    )
+
             # Create or update the syft.pub.yaml file if needed
             if needs_creation:
-                with open(syftperm_file, 'w') as f:
+                with open(syftperm_file, "w") as f:
                     f.write(required_syftperm_content)
-                logger.info(f"Created/updated read-only syft.pub.yaml file for {status_name} directory: {status_dir}")
-                
+                logger.info(
+                    f"Created/updated read-only syft.pub.yaml file for {status_name} directory: {status_dir}"
+                )
+
         except PermissionError as e:
             logger.error(f"Permission denied creating syft.pub.yaml file in {status_dir}: {e}")
             # Don't raise for read-only directories - they're not critical for core functionality
@@ -167,7 +181,7 @@ class CodeQueueClient:
         """Ensure the target's pending directory exists with proper syft.pub.yaml for cross-datasite writes."""
         target_queue_dir = self._get_target_queue_dir(target_email)
         pending_dir = target_queue_dir / JobStatus.pending.value
-        
+
         try:
             # Create pending directory and syft.pub.yaml file (handles both directory creation and permissions)
             self._create_pending_syftperm(pending_dir)
@@ -179,7 +193,7 @@ class CodeQueueClient:
     def _get_job_dir(self, job: CodeJob) -> Path:
         """Get directory for a specific job."""
         # If this is a cross-datasite job, use the datasite path
-        if hasattr(job, '_datasite_path') and job._datasite_path is not None:
+        if hasattr(job, "_datasite_path") and job._datasite_path is not None:
             return job._datasite_path / job.status.value / str(job.uid)
         return self._get_status_dir(job.status) / str(job.uid)
 
@@ -197,7 +211,9 @@ class CodeQueueClient:
         job_dir = self._get_status_dir(JobStatus.pending) / str(job_uid)
         return job_dir / "metadata.json"
 
-    def _get_cross_datasite_job_file(self, job_uid: UUID, datasite_queue_dir: Path) -> Optional[Path]:
+    def _get_cross_datasite_job_file(
+        self, job_uid: UUID, datasite_queue_dir: Path
+    ) -> Optional[Path]:
         """Get the metadata.json file path for a cross-datasite job."""
         # Search in all status directories within the specified datasite
         for status in JobStatus:
@@ -208,19 +224,21 @@ class CodeQueueClient:
                     return job_file
         return None
 
-    def _find_job_file_anywhere(self, job_uid: UUID, datasite_path: Optional[Path] = None) -> Optional[Path]:
+    def _find_job_file_anywhere(
+        self, job_uid: UUID, datasite_path: Optional[Path] = None
+    ) -> Optional[Path]:
         """Find a job file, searching both local and cross-datasite locations."""
         # If we have a known datasite path, search there first
         if datasite_path is not None:
             cross_datasite_file = self._get_cross_datasite_job_file(job_uid, datasite_path)
             if cross_datasite_file and cross_datasite_file.exists():
                 return cross_datasite_file
-        
+
         # Then search local datasite
         local_file = self._get_job_file(job_uid)
         if local_file and local_file.exists():
             return local_file
-            
+
         # If we didn't have a known datasite path, search all datasites
         if datasite_path is None:
             try:
@@ -231,12 +249,14 @@ class CodeQueueClient:
                             continue
                         queue_dir = datasite_dir / "app_data" / self.queue_name / "jobs"
                         if queue_dir.exists():
-                            cross_datasite_file = self._get_cross_datasite_job_file(job_uid, queue_dir)
+                            cross_datasite_file = self._get_cross_datasite_job_file(
+                                job_uid, queue_dir
+                            )
                             if cross_datasite_file and cross_datasite_file.exists():
                                 return cross_datasite_file
             except Exception:
                 pass  # Fall back to None if search fails
-                
+
         return None
 
     def _save_job(self, job: CodeJob):
@@ -248,16 +268,16 @@ class CodeQueueClient:
         current_status = object.__getattribute__(job, "status")
 
         # Determine if this is a cross-datasite job
-        if hasattr(job, '_datasite_path') and job._datasite_path is not None:
+        if hasattr(job, "_datasite_path") and job._datasite_path is not None:
             # Cross-datasite job - work with the original datasite location
             base_queue_dir = job._datasite_path
-            
+
             def get_cross_datasite_status_dir(status: JobStatus) -> Path:
                 return base_queue_dir / status.value
-            
+
             def get_cross_datasite_job_dir(job_status: JobStatus) -> Path:
                 return get_cross_datasite_status_dir(job_status) / str(job.uid)
-            
+
             # If status changed, move job directory to new status directory
             if old_status and old_status != current_status:
                 old_job_dir = get_cross_datasite_status_dir(old_status) / str(job.uid)
@@ -273,10 +293,14 @@ class CodeQueueClient:
                         if new_job_dir.exists():
                             shutil.rmtree(new_job_dir)
                         shutil.move(str(old_job_dir), str(new_job_dir))
-                        logger.info(f"Moved job {job.uid} from {old_status} to {job.status} in datasite")
+                        logger.info(
+                            f"Moved job {job.uid} from {old_status} to {job.status} in datasite"
+                        )
                     except PermissionError as e:
                         logger.error(f"Permission denied moving job {job.uid}: {e}")
-                        raise RuntimeError(f"Cannot approve job - insufficient permissions to modify job in original datasite")
+                        raise RuntimeError(
+                            "Cannot approve job - insufficient permissions to modify job in original datasite"
+                        )
                     except Exception as e:
                         logger.error(f"Error moving job {job.uid}: {e}")
                         raise RuntimeError(f"Failed to move job: {e}")
@@ -291,6 +315,7 @@ class CodeQueueClient:
                 job_file = job_dir / "metadata.json"
 
                 with open(job_file, "w") as f:
+
                     def custom_serializer(obj):
                         if isinstance(obj, Path):
                             return str(obj)
@@ -301,12 +326,14 @@ class CodeQueueClient:
                         raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
                     json.dump(job.model_dump(), f, indent=2, default=custom_serializer)
-                    
+
                 logger.info(f"Updated job {job.uid} metadata in original datasite")
-                
+
             except PermissionError as e:
                 logger.error(f"Permission denied updating job {job.uid} metadata: {e}")
-                raise RuntimeError(f"Cannot approve job - insufficient permissions to update job in original datasite")
+                raise RuntimeError(
+                    "Cannot approve job - insufficient permissions to update job in original datasite"
+                )
             except Exception as e:
                 logger.error(f"Error updating job {job.uid} metadata: {e}")
                 raise RuntimeError(f"Failed to update job metadata: {e}")
@@ -434,17 +461,17 @@ class CodeQueueClient:
     ) -> list[CodeJob]:
         """
         Search across all datasites for jobs.
-        
+
         Args:
             target_email: Filter by target email
             status: Filter by job status
             limit: Maximum number of jobs to return
-            
+
         Returns:
             List of matching jobs
         """
         jobs = []
-        
+
         try:
             # Get the datasites directory
             datasites_dir = self.syftbox_client.datasites
@@ -496,7 +523,7 @@ class CodeQueueClient:
                                 data = json.load(f)
                                 job = CodeJob.model_validate(data)
                                 job._client = self  # Set client reference
-                                
+
                                 # Track the original datasite queue directory for cross-datasite jobs
                                 job._datasite_path = queue_dir
 
@@ -634,33 +661,33 @@ class CodeQueueClient:
 
     def submit_code(
         self,
-                    target_email: str,
-                    code_folder: Path,
-                    name: str,
-                    description: Optional[str] = None,
+        target_email: str,
+        code_folder: Path,
+        name: str,
+        description: Optional[str] = None,
         tags: Optional[list[str]] = None,
     ) -> CodeJob:
         """
         Submit code for execution on a remote datasite.
-        
+
         Args:
             target_email: Email of the data owner
             code_folder: Local folder containing code and run.sh
             name: Human-readable name for the job
             description: Optional description
             tags: Optional tags for categorization
-            
+
         Returns:
             CodeJob: The created job
         """
         # Validate code folder
         if not code_folder.exists():
             raise ValueError(f"Code folder does not exist: {code_folder}")
-        
+
         run_script = code_folder / "run.sh"
         if not run_script.exists():
             raise ValueError(f"Code folder must contain run.sh: {run_script}")
-        
+
         # Create job
         job_create = JobCreate(
             name=name,
@@ -672,26 +699,26 @@ class CodeQueueClient:
 
         job = CodeJob(**job_create.model_dump(), requester_email=self.email)
         job._client = self  # Set the client reference
-        
+
         # Set up cross-datasite job - save to target's datasite instead of requester's
         target_queue_dir = self._get_target_queue_dir(target_email)
         job._datasite_path = target_queue_dir
-        
+
         # Ensure target's pending directory exists with proper permissions BEFORE copying/saving
         self._ensure_target_pending_directory(target_email)
-        
+
         # Copy code to target's queue location
         self._copy_code_to_queue(job)
-        
+
         # Save job to target's datasite queue (pending folder)
         self._save_job(job)
-        
+
         # Set permissions using syft-perm so recipient can access the job
         self._set_job_permissions(job)
-        
+
         logger.info(f"Submitted job '{name}' to {target_email}'s datasite")
         return job
-    
+
     def get_job(self, job_uid: UUID) -> Optional[CodeJob]:
         """Get a job by its UID, searching locally first then across all datasites."""
         # First try to find the job locally
@@ -703,32 +730,38 @@ class CodeQueueClient:
                 from uuid import UUID
 
                 data = json.load(f)
-                
+
                 # Convert string representations back to proper types
                 if "uid" in data and isinstance(data["uid"], str):
                     data["uid"] = UUID(data["uid"])
-                
+
                 for date_field in ["created_at", "updated_at", "started_at", "completed_at"]:
-                    if date_field in data and data[date_field] and isinstance(data[date_field], str):
+                    if (
+                        date_field in data
+                        and data[date_field]
+                        and isinstance(data[date_field], str)
+                    ):
                         data[date_field] = datetime.fromisoformat(data[date_field])
-                
+
                 job = CodeJob.model_validate(data)
                 job._client = self
-                
+
                 # For cross-datasite jobs, set the datasite path
                 # A job is cross-datasite if the target is the current user (job was submitted TO us)
                 # and it's stored in our datasite, OR if we found it in our local search
                 # but it's not our job (requester_email != self.email)
-                if (job.target_email == self.email and job.requester_email != self.email):
+                if job.target_email == self.email and job.requester_email != self.email:
                     # This is a cross-datasite job submitted to us - set our datasite as the path
                     job._datasite_path = self._get_queue_dir()
-                    logger.debug(f"Found cross-datasite job {job_uid} in local datasite - set datasite path")
-                
+                    logger.debug(
+                        f"Found cross-datasite job {job_uid} in local datasite - set datasite path"
+                    )
+
                 return job
-        
+
         # If not found locally, search across all datasites
         logger.debug(f"Job {job_uid} not found locally, searching across all datasites")
-        
+
         try:
             datasites_dir = self.syftbox_client.datasites
             if not datasites_dir.exists():
@@ -749,27 +782,28 @@ class CodeQueueClient:
                     status_dir = queue_dir / status.value
                     if not status_dir.exists():
                         continue
-                        
+
                     job_dir = status_dir / str(job_uid)
                     if job_dir.exists():
                         metadata_file = job_dir / "metadata.json"
                         if metadata_file.exists():
                             with open(metadata_file) as f:
                                 import json
+
                                 data = json.load(f)
                                 job = CodeJob.model_validate(data)
                                 job._client = self
                                 # Track the original datasite path for cross-datasite operations
                                 job._datasite_path = queue_dir
-                                
+
                                 logger.debug(f"Found job {job_uid} in datasite {datasite_dir.name}")
                                 return job
-                
+
         except Exception as e:
             logger.warning(f"Error searching for job {job_uid} across datasites: {e}")
-        
+
         return None
-    
+
     def list_my_jobs(self, limit: int = 50) -> list[CodeJob]:
         """List jobs submitted by me (searches across all datasites since jobs are stored in target's datasite)."""
         # Since jobs are now stored in the target's datasite, we need to search across all datasites
@@ -778,33 +812,33 @@ class CodeQueueClient:
 
     def list_all_jobs(self, limit: int = 50) -> list[CodeJob]:
         """List jobs submitted to me (searches local datasite since jobs are now stored in target's datasite)."""
-        # Since jobs are now stored in the target's datasite, jobs submitted to me 
+        # Since jobs are now stored in the target's datasite, jobs submitted to me
         # will be in my local datasite
         return self.list_jobs(target_email=self.email, limit=limit)
-    
+
     def get_job_output(self, job_uid: UUID) -> Optional[Path]:
         """Get the output folder for a completed job."""
         job = self.get_job(job_uid)
         if not job:
             return None
-        
+
         # Construct output directory path using cross-datasite aware job directory
         job_dir = self._get_job_dir(job)
         output_dir = job_dir / "output"
-        
+
         return output_dir if output_dir.exists() else None
-    
+
     def get_job_logs(self, job_uid: UUID) -> Optional[str]:
         """Get execution logs for a job."""
         job = self.get_job(job_uid)
         if not job:
             return None
-        
+
         log_file = self._get_job_dir(job) / "execution.log"
         if log_file.exists():
             return log_file.read_text()
         return None
-    
+
     def wait_for_completion(self, job_uid: UUID, timeout: int = 600) -> CodeJob:
         """
         Wait for a job to complete.
@@ -855,43 +889,48 @@ class CodeQueueClient:
         job = self.get_job(job_uid)
         if not job:
             return False
-        
+
         if job.status not in (JobStatus.pending, JobStatus.approved):
             logger.warning(f"Cannot cancel job {job_uid} with status {job.status}")
             return False
-        
+
         job.update_status(JobStatus.rejected, "Cancelled by requester")
         self._save_job(job)
         return True
-    
+
     def _copy_code_to_queue(self, job: CodeJob):
         """Copy code folder to the queue location (supports cross-datasite jobs)."""
         job_dir = self._get_job_dir(job)
-        
+
         try:
             job_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Ensure syft.pub.yaml exists for pending directories when copying to cross-datasite locations
-            if (job.status == JobStatus.pending and 
-                hasattr(job, '_datasite_path') and job._datasite_path is not None):
+            if (
+                job.status == JobStatus.pending
+                and hasattr(job, "_datasite_path")
+                and job._datasite_path is not None
+            ):
                 self._create_pending_syftperm(job_dir.parent)
-            
+
             code_dir = job_dir / "code"
             if code_dir.exists():
                 shutil.rmtree(code_dir)
-            
+
             shutil.copytree(job.code_folder, code_dir)
             job.code_folder = code_dir  # Update to queue location
-            
+
             # Log where the code was copied
-            if hasattr(job, '_datasite_path') and job._datasite_path is not None:
+            if hasattr(job, "_datasite_path") and job._datasite_path is not None:
                 logger.debug(f"Copied code to cross-datasite location: {code_dir}")
             else:
                 logger.debug(f"Copied code to local location: {code_dir}")
-                
+
         except PermissionError as e:
             logger.error(f"Permission denied copying code to {job_dir}: {e}")
-            raise RuntimeError(f"Cannot submit job - insufficient permissions to create job in target datasite")
+            raise RuntimeError(
+                "Cannot submit job - insufficient permissions to create job in target datasite"
+            )
         except Exception as e:
             logger.error(f"Error copying code to {job_dir}: {e}")
             raise RuntimeError(f"Failed to copy code: {e}")
@@ -900,7 +939,7 @@ class CodeQueueClient:
         """Set proper permissions for job files so the recipient can see and approve them."""
         try:
             job_dir = self._get_job_dir(job)
-            
+
             # Set permissions for the metadata.json file
             # Target user needs write access to approve/reject (change status)
             metadata_file = job_dir / "metadata.json"
@@ -908,8 +947,11 @@ class CodeQueueClient:
                 set_file_permissions(
                     str(metadata_file),
                     read_users=[job.target_email, job.requester_email],
-                    write_users=[job.target_email, job.requester_email],  # Both can modify for approval/updates
-                    admin_users=[job.requester_email]  # Requester has admin rights
+                    write_users=[
+                        job.target_email,
+                        job.requester_email,
+                    ],  # Both can modify for approval/updates
+                    admin_users=[job.requester_email],  # Requester has admin rights
                 )
                 logger.debug(f"Set permissions for metadata file: {metadata_file}")
 
@@ -923,7 +965,7 @@ class CodeQueueClient:
                             str(file_path),
                             read_users=[job.target_email, job.requester_email],
                             write_users=[job.requester_email],  # Only requester can modify code
-                            admin_users=[job.requester_email]
+                            admin_users=[job.requester_email],
                         )
                         logger.debug(f"Set permissions for code file: {file_path}")
 
@@ -931,21 +973,26 @@ class CodeQueueClient:
             set_file_permissions(
                 str(job_dir),
                 read_users=[job.target_email, job.requester_email],
-                write_users=[job.target_email, job.requester_email],  # Both can modify directory for job moves
-                admin_users=[job.requester_email]
+                write_users=[
+                    job.target_email,
+                    job.requester_email,
+                ],  # Both can modify directory for job moves
+                admin_users=[job.requester_email],
             )
 
-            logger.info(f"Successfully set permissions for job {job.uid} - {job.target_email} can now access and approve/reject the job")
+            logger.info(
+                f"Successfully set permissions for job {job.uid} - {job.target_email} can now access and approve/reject the job"
+            )
 
         except Exception as e:
             logger.warning(f"Failed to set permissions for job {job.uid}: {e}")
             # Don't fail the job submission if permissions can't be set
             pass
-    
+
     def approve_job(self, job_uid: Union[str, UUID], reason: Optional[str] = None) -> bool:
         """
         Approve a job for execution.
-        
+
         The job will be moved from pending to approved within the reviewer's own datasite.
 
         Args:
@@ -956,43 +1003,53 @@ class CodeQueueClient:
             bool: True if approved successfully
         """
         logger.debug(f"Attempting to approve job {job_uid}")
-        
+
         job = self.get_job(job_uid)
         if not job:
             logger.warning(f"Job {job_uid} not found")
             return False
 
         logger.debug(f"Found job {job_uid}: target={job.target_email}, current_user={self.email}")
-        
+
         if job.target_email != self.email:
-            logger.warning(f"Cannot approve job {job_uid} - not the target owner (target={job.target_email}, current={self.email})")
+            logger.warning(
+                f"Cannot approve job {job_uid} - not the target owner (target={job.target_email}, current={self.email})"
+            )
             return False
 
         if job.status != JobStatus.pending:
             logger.warning(f"Cannot approve job {job_uid} with status {job.status}")
             return False
 
-        logger.debug(f"Updating job {job_uid} status from {job.status} to approved in reviewer's datasite")
-        
+        logger.debug(
+            f"Updating job {job_uid} status from {job.status} to approved in reviewer's datasite"
+        )
+
         try:
             # For cross-datasite jobs, keep the job in the target's datasite
             # For local jobs, ensure it's in the reviewer's datasite
-            if not hasattr(job, '_datasite_path') or job._datasite_path is None:
+            if not hasattr(job, "_datasite_path") or job._datasite_path is None:
                 # Local job - save in reviewer's own datasite
                 job._datasite_path = self._get_target_queue_dir(self.email)
                 logger.debug(f"Approving local job {job_uid} - will save to reviewer's datasite")
             else:
                 # Cross-datasite job - keep in target's datasite where it was originally submitted
-                logger.debug(f"Approving cross-datasite job {job_uid} - keeping in target's datasite")
-            
+                logger.debug(
+                    f"Approving cross-datasite job {job_uid} - keeping in target's datasite"
+                )
+
             job.update_status(JobStatus.approved)
             self._save_job(job)
-            
+
             # Log the appropriate location
-            if hasattr(job, '_datasite_path') and job._datasite_path is not None:
-                logger.info(f"Approved job '{job.name}' - moved to approved folder in target's datasite: {job._datasite_path}/approved/{job.uid}/")
+            if hasattr(job, "_datasite_path") and job._datasite_path is not None:
+                logger.info(
+                    f"Approved job '{job.name}' - moved to approved folder in target's datasite: {job._datasite_path}/approved/{job.uid}/"
+                )
             else:
-                logger.info(f"Approved job '{job.name}' - moved to approved folder in {self.email}'s datasite")
+                logger.info(
+                    f"Approved job '{job.name}' - moved to approved folder in {self.email}'s datasite"
+                )
             return True
         except Exception as e:
             logger.error(f"Failed to approve job {job_uid}: {e}")
@@ -1003,7 +1060,7 @@ class CodeQueueClient:
     def reject_job(self, job_uid: Union[str, UUID], reason: Optional[str] = None) -> bool:
         """
         Reject a job.
-        
+
         The job will be moved from pending to rejected within the reviewer's own datasite.
 
         Args:
@@ -1028,22 +1085,28 @@ class CodeQueueClient:
         try:
             # For cross-datasite jobs, keep the job in the target's datasite
             # For local jobs, ensure it's in the reviewer's datasite
-            if not hasattr(job, '_datasite_path') or job._datasite_path is None:
+            if not hasattr(job, "_datasite_path") or job._datasite_path is None:
                 # Local job - save in reviewer's own datasite
                 job._datasite_path = self._get_target_queue_dir(self.email)
                 logger.debug(f"Rejecting local job {job_uid} - will save to reviewer's datasite")
             else:
                 # Cross-datasite job - keep in target's datasite where it was originally submitted
-                logger.debug(f"Rejecting cross-datasite job {job_uid} - keeping in target's datasite")
+                logger.debug(
+                    f"Rejecting cross-datasite job {job_uid} - keeping in target's datasite"
+                )
 
             job.update_status(JobStatus.rejected, reason)
             self._save_job(job)
 
             # Log the appropriate location
-            if hasattr(job, '_datasite_path') and job._datasite_path is not None:
-                logger.info(f"Rejected job '{job.name}' - moved to rejected folder in target's datasite: {job._datasite_path}/rejected/{job.uid}/")
+            if hasattr(job, "_datasite_path") and job._datasite_path is not None:
+                logger.info(
+                    f"Rejected job '{job.name}' - moved to rejected folder in target's datasite: {job._datasite_path}/rejected/{job.uid}/"
+                )
             else:
-                logger.info(f"Rejected job '{job.name}' - moved to rejected folder in {self.email}'s datasite")
+                logger.info(
+                    f"Rejected job '{job.name}' - moved to rejected folder in {self.email}'s datasite"
+                )
             return True
         except Exception as e:
             logger.error(f"Failed to reject job {job_uid}: {e}")
@@ -1075,7 +1138,7 @@ class CodeQueueClient:
                 # Get relative path from the code directory
                 relative_path = item.relative_to(code_dir)
                 files.append(str(relative_path))
-        
+
         return sorted(files)
 
     def read_job_file(self, job_uid: Union[str, UUID], filename: str) -> Optional[str]:
@@ -1107,7 +1170,7 @@ class CodeQueueClient:
             return None
 
         try:
-            return file_path.read_text(encoding='utf-8')
+            return file_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             # For binary files, return a placeholder
             return f"<Binary file: {filename}>"
@@ -1144,40 +1207,42 @@ class CodeQueueClient:
         # Walk through all files and directories
         for item in code_dir.rglob("*"):
             relative_path = str(item.relative_to(code_dir))
-            
+
             if item.is_file():
                 structure["total_files"] += 1
-                
+
                 # Read file content
                 try:
-                    content = item.read_text(encoding='utf-8')
+                    content = item.read_text(encoding="utf-8")
                     structure["files"][relative_path] = {
                         "content": content,
                         "size": len(content),
                         "lines": len(content.splitlines()),
-                        "type": "text"
+                        "type": "text",
                     }
                 except UnicodeDecodeError:
                     structure["files"][relative_path] = {
                         "content": f"<Binary file: {item.stat().st_size} bytes>",
                         "size": item.stat().st_size,
                         "lines": 0,
-                        "type": "binary"
+                        "type": "binary",
                     }
                 except Exception as e:
                     structure["files"][relative_path] = {
                         "content": f"<Error reading file: {e}>",
                         "size": 0,
                         "lines": 0,
-                        "type": "error"
+                        "type": "error",
                     }
-                
+
                 # Check for run script
                 if relative_path in ("run.sh", "run.py", "run.bash"):
                     structure["has_run_script"] = True
                     if structure["files"][relative_path]["type"] == "text":
-                        structure["run_script_content"] = structure["files"][relative_path]["content"]
-            
+                        structure["run_script_content"] = structure["files"][relative_path][
+                            "content"
+                        ]
+
             elif item.is_dir():
                 structure["directories"].append(relative_path)
 
@@ -1200,7 +1265,7 @@ class CodeQueueClient:
         # Construct output directory path using cross-datasite aware job directory
         job_dir = self._get_job_dir(job)
         output_dir = job_dir / "output"
-        
+
         if not output_dir.exists():
             return []
 
@@ -1214,7 +1279,7 @@ class CodeQueueClient:
         except Exception as e:
             logger.warning(f"Error listing output files for job {job_uid}: {e}")
             return []
-        
+
         return sorted(files)
 
     def read_job_output_file(self, job_uid: Union[str, UUID], filename: str) -> Optional[str]:
@@ -1248,7 +1313,7 @@ class CodeQueueClient:
             return None
 
         try:
-            return file_path.read_text(encoding='utf-8')
+            return file_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             # For binary files, return a placeholder
             return f"<Binary file: {filename}>"
@@ -1260,11 +1325,11 @@ class CodeQueueClient:
 def create_client(target_email: str = None, **config_kwargs) -> CodeQueueClient:
     """
     Create a code queue client.
-    
+
     Args:
         target_email: If provided, optimizes for submitting to this target
         **config_kwargs: Additional configuration options
-        
+
     Returns:
         CodeQueueClient instance
     """

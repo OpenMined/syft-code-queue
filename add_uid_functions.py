@@ -2,19 +2,20 @@
 
 # Script to add UID-based JavaScript functions to models.py
 
+
 def add_uid_functions():
     # Read the file
-    with open('src/syft_code_queue/models.py', 'r') as f:
+    with open("src/syft_code_queue/models.py") as f:
         content = f.read()
-    
+
     # Find the position to insert the new functions (before </script>)
-    script_end = content.find('        </script>')
+    script_end = content.find("        </script>")
     if script_end == -1:
         print("Could not find </script> tag")
         return
-    
+
     # Define the new functions
-    new_functions = '''
+    new_functions = """
         // UID-based functions for individual row buttons
         window.approveJobByUid = function(jobUid) {
             var reason = prompt("Approval reason (optional):", "Approved via Jupyter interface");
@@ -121,16 +122,17 @@ def add_uid_functions():
                 alert('Failed to copy to clipboard. Please copy manually:\\\\n\\\\n' + code);
             });
         };
-'''
-    
+"""
+
     # Insert the new functions
     new_content = content[:script_end] + new_functions + content[script_end:]
-    
+
     # Write back to file
-    with open('src/syft_code_queue/models.py', 'w') as f:
+    with open("src/syft_code_queue/models.py", "w") as f:
         f.write(new_content)
-    
+
     print("Successfully added UID-based JavaScript functions")
+
 
 if __name__ == "__main__":
     add_uid_functions()

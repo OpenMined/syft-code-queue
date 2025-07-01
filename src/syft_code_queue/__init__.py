@@ -582,7 +582,7 @@ class UnifiedAPI:
             code_folder: Path to folder containing code and run.sh script
             name: Human-readable name for the job
             description: Optional description of what the job does
-            timeout_seconds: Timeout in seconds after which job will be automatically rejected/failed (default: 24 hours)
+            timeout_seconds: Timeout in seconds after which job will be automatically timedout/failed (default: 24 hours)
             tags: Optional tags for categorization (e.g. ["privacy-safe", "aggregate"])
 
         Returns:
@@ -612,7 +612,7 @@ class UnifiedAPI:
             name: Human-readable name for the job
             description: Optional description
             requirements: Optional list of Python packages to install
-            timeout_seconds: Timeout in seconds after which job will be automatically rejected/failed (default: 24 hours)
+            timeout_seconds: Timeout in seconds after which job will be automatically timedout/failed (default: 24 hours)
             tags: Optional tags for categorization
 
         Returns:
@@ -642,7 +642,7 @@ class UnifiedAPI:
             script_content: Bash script content
             name: Human-readable name for the job
             description: Optional description
-            timeout_seconds: Timeout in seconds after which job will be automatically rejected/failed (default: 24 hours)
+            timeout_seconds: Timeout in seconds after which job will be automatically timedout/failed (default: 24 hours)
             tags: Optional tags for categorization
 
         Returns:
@@ -824,6 +824,8 @@ class UnifiedAPI:
         # The properties will fetch fresh data on next access
         pass
 
+
+
     def help(self):
         """Show focused help for core workflow methods."""
         help_text = f"""
@@ -834,6 +836,8 @@ class UnifiedAPI:
   q.datasites.responsive_to_me()     # Show datasites that have responded to ME
   q.datasites.responsive()           # Show datasites that have responded to ANYONE
   q.datasites.with_pending_jobs()    # Show datasites with pending jobs
+  q.datasites.ping()                 # Send ping jobs to all datasites
+  q.datasites.responsive_to_me().ping()  # Ping only responsive datasites
 
 📤 Submit Jobs:
   q.submit_job("owner@org.com", "./my_analysis", "Statistical Analysis")
@@ -889,6 +893,7 @@ review_job = jobs.review_job
 inspect_job = jobs.inspect_job
 read_job_file = jobs.read_job_file
 list_job_files = jobs.list_job_files
+
 status = jobs.status
 help = jobs.help
 

@@ -570,7 +570,7 @@ class CodeQueueClient:
             name: Human-readable name for the job
             description: Optional description
             requirements: Optional list of Python packages to install
-            timeout_seconds: Timeout in seconds after which job will be automatically rejected/failed (default: 24 hours)
+            timeout_seconds: Timeout in seconds after which job will be automatically timedout/failed (default: 24 hours)
             tags: Optional tags for categorization
 
         Returns:
@@ -628,7 +628,7 @@ class CodeQueueClient:
             script_content: Bash script content
             name: Human-readable name for the job
             description: Optional description
-            timeout_seconds: Timeout in seconds after which job will be automatically rejected/failed (default: 24 hours)
+            timeout_seconds: Timeout in seconds after which job will be automatically timedout/failed (default: 24 hours)
             tags: Optional tags for categorization
 
         Returns:
@@ -682,7 +682,7 @@ class CodeQueueClient:
             code_folder: Local folder containing code and run.sh
             name: Human-readable name for the job
             description: Optional description
-            timeout_seconds: Timeout in seconds after which job will be automatically rejected/failed (default: 24 hours)
+            timeout_seconds: Timeout in seconds after which job will be automatically timedout/failed (default: 24 hours)
             tags: Optional tags for categorization
 
         Returns:

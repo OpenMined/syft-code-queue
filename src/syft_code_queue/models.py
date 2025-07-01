@@ -21,6 +21,7 @@ class JobStatus(str, enum.Enum):
     completed = "completed"  # Finished successfully
     failed = "failed"  # Execution failed
     rejected = "rejected"  # Rejected by data owner
+    timedout = "timedout"  # Timed out waiting for approval
 
 
 class CodeJob(BaseModel):
@@ -319,7 +320,7 @@ class CodeJob(BaseModel):
     @property
     def is_terminal(self) -> bool:
         """Check if job is in a terminal state."""
-        return self.status in (JobStatus.completed, JobStatus.failed, JobStatus.rejected)
+        return self.status in (JobStatus.completed, JobStatus.failed, JobStatus.rejected, JobStatus.timedout)
 
     @property
     def is_expired(self) -> bool:
@@ -347,8 +348,8 @@ class CodeJob(BaseModel):
     def get_timeout_status(self) -> JobStatus:
         """Determine what status an expired job should be moved to."""
         if self.status == JobStatus.pending:
-            # Pending jobs that timeout are considered rejected (datasite owner never responded)
-            return JobStatus.rejected
+            # Pending jobs that timeout are moved to timedout (datasite owner never responded)
+            return JobStatus.timedout
         elif self.status in (JobStatus.approved, JobStatus.running):
             # Approved/running jobs that timeout are considered failed (execution timeout)
             return JobStatus.failed
@@ -2846,8 +2847,8 @@ class DataSitesCollection:
                         continue
 
                     # Count jobs in different statuses, deduplicating by UID
-                    # Pipeline order: pending -> approved/rejected -> running -> completed/failed
-                    pipeline_order = ["pending", "approved", "rejected", "running", "completed", "failed"]
+                    # Pipeline order: pending -> approved/rejected/timedout -> running -> completed/failed
+                    pipeline_order = ["pending", "approved", "rejected", "timedout", "running", "completed", "failed"]
                     
                     # Collect all job UIDs and their statuses
                     job_uids_by_status = {}
@@ -2912,8 +2913,15 @@ class DataSitesCollection:
                     logger.debug(f"Error scanning datasite {datasite_dir.name}: {e}")
                     continue
 
-            # Sort by activity level and then by email
-            datasites.sort(key=lambda x: (-x["total_jobs"], x["email"]))
+            # Sort by default: last response to me (most recent first), then by email
+            datasites.sort(key=lambda x: (
+                # Put datasites that responded to me first, then others
+                0 if x["last_response_to_me"] else 1,
+                # Within each group, sort by last response time (most recent first)
+                -(x["last_response_to_me"].timestamp() if x["last_response_to_me"] else 0),
+                # Then by email as tiebreaker
+                x["email"]
+            ))
             return datasites
 
         except Exception as e:
@@ -2924,11 +2932,12 @@ class DataSitesCollection:
         """Get the last activity timestamp for a queue directory.
         
         Only considers jobs that have been processed (approved, running, completed, failed, rejected).
-        Pending jobs don't count as activity since they're just waiting for action.
+        Pending and timedout jobs don't count as activity since they represent lack of action.
         """
         try:
             latest_time = None
             # Only look at statuses that represent actual activity/processing
+            # Note: "timedout" is excluded as it represents lack of activity, not activity
             active_statuses = ["approved", "running", "completed", "failed", "rejected"]
             
             for status_name in active_statuses:
@@ -2961,6 +2970,7 @@ class DataSitesCollection:
                 current_user_email = self.syftbox_client.email
             
             # Statuses that indicate the datasite owner responded/took action
+            # Note: "timedout" is excluded as it represents lack of response, not a response
             response_statuses = ["approved", "rejected", "running", "completed", "failed"]
             
             responded_to_me = False
@@ -3043,6 +3053,7 @@ class DataSitesCollection:
         """Refresh is not needed since datasites collection is always fresh from filesystem."""
         return self
 
+    @property
     def responsive_to_me(self):
         """Filter to datasites that have responded to my job requests before."""
         datasites = self._load_datasites()
@@ -3051,6 +3062,7 @@ class DataSitesCollection:
         collection._override_data = responsive_datasites
         return collection
     
+    @property
     def responsive(self):
         """Filter to datasites that have responded to anyone's job requests."""
         datasites = self._load_datasites()
@@ -3059,6 +3071,7 @@ class DataSitesCollection:
         collection._override_data = responsive_datasites
         return collection
 
+    @property
     def with_pending_jobs(self):
         """Filter to datasites with pending jobs."""
         datasites = self._load_datasites()
@@ -3066,6 +3079,192 @@ class DataSitesCollection:
         collection = DataSitesCollection(self.syftbox_client)
         collection._override_data = pending_datasites
         return collection
+
+    def sort_by(self, column: str, reverse: bool = False):
+        """
+        Sort datasites by any column.
+        
+        Args:
+            column: Column name to sort by. Available columns:
+                   'email', 'total_jobs', 'pending', 'running', 'completed', 'failed',
+                   'timedout', 'responsiveness', 'last_response_to_me', 'last_activity'
+            reverse: True for descending order, False for ascending
+            
+        Returns:
+            New sorted DataSitesCollection
+        """
+        datasites = self._get_current_data()
+        
+        def get_sort_key(ds):
+            if column == 'email':
+                return ds['email']
+            elif column == 'total_jobs':
+                return ds['total_jobs']
+            elif column == 'pending':
+                return ds['status_counts']['pending']
+            elif column == 'running':
+                return ds['status_counts']['running']
+            elif column == 'completed':
+                return ds['status_counts']['completed']
+            elif column == 'failed':
+                return ds['status_counts']['failed']
+            elif column == 'timedout':
+                return ds['status_counts']['timedout']
+            elif column == 'responsiveness':
+                # Sort order: responsive_to_me, responsive_to_others, unresponsive
+                order = {'responsive_to_me': 1, 'responsive_to_others': 2, 'unresponsive': 3}
+                return order.get(ds['responsiveness'], 4)
+            elif column == 'last_response_to_me':
+                # Handle None values - put them at the end
+                if ds['last_response_to_me'] is None:
+                    return 0 if reverse else float('inf')
+                return ds['last_response_to_me'].timestamp()
+            elif column == 'last_activity':
+                # Handle None values - put them at the end
+                if ds['last_activity'] is None:
+                    return 0 if reverse else float('inf')
+                return ds['last_activity'].timestamp()
+            else:
+                raise ValueError(f"Unknown column: {column}. Available columns: email, total_jobs, pending, running, completed, failed, timedout, responsiveness, last_response_to_me, last_activity")
+        
+        try:
+            sorted_datasites = sorted(datasites, key=get_sort_key, reverse=reverse)
+            collection = DataSitesCollection(self.syftbox_client)
+            collection._override_data = sorted_datasites
+            return collection
+        except Exception as e:
+            from loguru import logger
+            logger.warning(f"Error sorting by column '{column}': {e}")
+            return self
+
+    def ping(self, timeout_minutes: float = 0.5, include_self: bool = False, block: bool = False) -> dict:
+        """
+        Send ping jobs to all datasites in this collection.
+        
+        Args:
+            timeout_minutes: How long the ping jobs should remain valid (default 0.5 minutes = 30 seconds)
+            include_self: Whether to send a ping job to yourself (default False)
+            block: If True, wait for responses and show a live status bar (default False)
+                - Shows a carriage-return based (and pretty) status bar for how long it takes datasites to reply
+                - At the end, prints a summary of which datasites responded and which did not
+        Returns:
+            dict: Summary of ping results with 'sent_to', 'failed_to_send', 'jobs', and (if block=True) 'responses'
+        """
+        if not self.syftbox_client:
+            return {
+                "sent_to": [],
+                "failed_to_send": [],
+                "jobs": [],
+                "error": "No SyftBox client available"
+            }
+        
+        from .client import CodeQueueClient
+        from . import QueueConfig
+        import time
+        import sys
+        config = QueueConfig()
+        client = CodeQueueClient(self.syftbox_client, config)
+        ping_script = '''import os
+with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
+    file.write("This is a ping to see if you're alive and receiving jobs from me.")
+'''
+        timeout_seconds = int(timeout_minutes * 60)
+        sent_to = []
+        failed_to_send = []
+        ping_jobs = []
+        datasites_info = self._get_current_data()
+        current_user_email = self.syftbox_client.email
+        from loguru import logger
+        logger.info(f"Pinging {len(datasites_info)} datasites from collection")
+        for datasite_info in datasites_info:
+            target_email = datasite_info["email"]
+            if target_email == current_user_email and not include_self:
+                logger.debug(f"Skipping ping to self: {target_email} (set include_self=True to ping yourself)")
+                continue
+            try:
+                job = client.create_python_job(
+                    target_email=target_email,
+                    script_content=ping_script,
+                    name=f'Ping from {current_user_email}',
+                    description='Network connectivity test - checking if you can receive jobs from me.',
+                    timeout_seconds=timeout_seconds,
+                    tags=['ping', 'network-test']
+                )
+                sent_to.append(target_email)
+                ping_jobs.append(job)
+                logger.info(f"Sent ping to {target_email} (job {job.short_id})")
+            except Exception as e:
+                failed_to_send.append({"email": target_email, "error": str(e)})
+                logger.warning(f"Failed to send ping to {target_email}: {e}")
+        summary = {
+            "sent_to": sent_to,
+            "failed_to_send": failed_to_send,
+            "jobs": ping_jobs,
+            "timeout_minutes": timeout_minutes,
+            "collection_size": len(datasites_info)
+        }
+        if not block:
+            logger.info(f"Ping summary: sent to {len(sent_to)} datasites, failed to send to {len(failed_to_send)}")
+            return summary
+        # --- Blocking mode: poll for responses and show status bar ---
+        job_map = {job.target_email: job for job in ping_jobs}
+        responded = set()
+        pending = set(sent_to)
+        failed = set(x["email"] for x in failed_to_send)
+        start_time = time.time()
+        poll_interval = 1.0
+        def get_status():
+            nonlocal responded, pending
+            for email, job in job_map.items():
+                job.refresh()
+                if job.status in (job.status.completed, job.status.failed):
+                    responded.add(email)
+            pending = set(sent_to) - responded
+        def print_status_bar(elapsed, responded, pending, total, responded_list, pending_list):
+            bar_len = 30
+            done = int(bar_len * len(responded) / total) if total else 0
+            bar = "█" * done + "-" * (bar_len - done)
+            resp_str = ','.join(responded_list)
+            pend_str = ','.join(pending_list)
+            sys.stdout.write(f"\r[Ping] [{bar}] {len(responded)}/{total} responded, {len(pending)} pending | {int(elapsed)}s | responded: [{resp_str}] | pending: [{pend_str}]   ")
+            sys.stdout.flush()
+        while time.time() - start_time < timeout_seconds and pending:
+            get_status()
+            print_status_bar(
+                time.time() - start_time,
+                responded,
+                pending,
+                len(sent_to),
+                sorted(responded),
+                sorted(pending),
+            )
+            time.sleep(poll_interval)
+        get_status()
+        print_status_bar(
+            time.time() - start_time,
+            responded,
+            pending,
+            len(sent_to),
+            sorted(responded),
+            sorted(pending),
+        )
+        print()
+        # Final summary
+        print("\nPing Results:")
+        for email in sent_to:
+            if email in responded:
+                print(f"  ✅ {email} responded")
+            else:
+                print(f"  ❌ {email} did NOT respond in time")
+        if failed:
+            print("\nFailed to send ping to:")
+            for email in failed:
+                print(f"  ⚠️  {email}")
+        summary["responded"] = list(responded)
+        summary["pending"] = list(pending)
+        summary["failed"] = list(failed)
+        summary["elapsed_seconds"] = int(time.time() - start_time)
+        return summary
 
     def __len__(self):
         return len(self._get_current_data())
@@ -3176,35 +3375,57 @@ class DataSitesCollection:
             </div>
             """
 
+        # List of all job statuses
+        status_names = [
+            ("pending", "Pending"),
+            ("approved", "Approved"),
+            ("running", "Running"),
+            ("completed", "Completed"),
+            ("failed", "Failed"),
+            ("rejected", "Rejected"),
+            ("timedout", "Timed Out"),
+        ]
+
+        # Determine current sort column (if any)
+        # For now, just default to 'last_response_to_me' (could be improved with JS in the future)
+        current_sort = getattr(self, '_last_sort_column', 'last_response_to_me')
+        current_sort_reverse = getattr(self, '_last_sort_reverse', True)
+        sort_indicator = lambda col: (" &#9650;" if current_sort == col and not current_sort_reverse else (" &#9660;" if current_sort == col and current_sort_reverse else ""))
+
         # Create HTML table
         html = """
         <div style="padding: 20px; border: 2px solid #ddd; border-radius: 8px; background-color: #f9f9f9;">
             <h3 style="color: #333; margin-top: 0;">📡 DataSites with Code Queues</h3>
             <div style="overflow-x: auto; margin-top: 10px;">
-                <table style="min-width: 1000px; border-collapse: collapse; width: 100%;">
+                <table id="datasites-table" style="min-width: 1200px; border-collapse: collapse; width: 100%;">
                     <thead>
                         <tr style="background-color: #e9e9e9;">
                             <th style="padding: 8px; border: 1px solid #ddd; text-align: left; min-width: 30px;">#</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left; min-width: 200px;">Email</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: left; min-width: 140px;">Responsiveness</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 50px;">Total</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 60px;">Pending</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 60px;">Running</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 70px;">Completed</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 100px;">Last Activity</th>
-                            <th style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 120px;">Last Response to Me</th>
+                            <th class="sortable" data-sort="email" style="padding: 8px; border: 1px solid #ddd; text-align: left; min-width: 200px; cursor: pointer;">Email{email_sort}</th>
+                            <th class="sortable" data-sort="responsiveness" style="padding: 8px; border: 1px solid #ddd; text-align: left; min-width: 140px; cursor: pointer;">Responsiveness{resp_sort}</th>
+                            <th class="sortable" data-sort="total_jobs" style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 50px; cursor: pointer;">Total{total_sort}</th>
+        """.format(
+            email_sort=sort_indicator('email'),
+            resp_sort=sort_indicator('responsiveness'),
+            total_sort=sort_indicator('total_jobs'),
+        )
+        for status_key, status_label in status_names:
+            html += f'<th class="sortable" data-sort="{status_key}" style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 60px; cursor: pointer;">{status_label}{sort_indicator(status_key)}</th>'
+        html += """
+                            <th class="sortable" data-sort="last_activity" style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 100px; cursor: pointer;">Last Activity{activity_sort}</th>
+                            <th class="sortable" data-sort="last_response_to_me" style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 120px; cursor: pointer;">Last Response to Me{lastresp_sort}</th>
                         </tr>
                     </thead>
                     <tbody>
-        """
-        
+        """.format(
+            activity_sort=sort_indicator('last_activity'),
+            lastresp_sort=sort_indicator('last_response_to_me'),
+        )
+
         for i, datasite in enumerate(datasites):
             email = datasite["email"]
             total = datasite["total_jobs"]
-            pending = datasite["status_counts"]["pending"]
-            running = datasite["status_counts"]["running"]
-            completed = datasite["status_counts"]["completed"]
-            
+            status_counts = datasite["status_counts"]
             # Status with color coding based on responsiveness
             if datasite["responsiveness"] == "responsive_to_me":
                 status_badge = '<span style="color: #28a745; font-weight: bold;">🟢 Responsive to Me</span>'
@@ -3212,7 +3433,6 @@ class DataSitesCollection:
                 status_badge = '<span style="color: #ffc107; font-weight: bold;">🟡 Responsive to Others</span>'
             else:
                 status_badge = '<span style="color: #dc3545; font-weight: bold;">🔴 Unresponsive</span>'
-            
             # Format last activity
             last_activity = datasite["last_activity"]
             if last_activity:
@@ -3226,7 +3446,6 @@ class DataSitesCollection:
                     activity_str = f"{diff.seconds // 60}m ago"
             else:
                 activity_str = "Never"
-
             # Format last response to me
             last_response_to_me = datasite["last_response_to_me"]
             if last_response_to_me:
@@ -3240,24 +3459,35 @@ class DataSitesCollection:
                     response_to_me_str = f"{diff.seconds // 60}m ago"
             else:
                 response_to_me_str = "Never"
-
-            # Row color based on activity
             row_color = "#fff" if i % 2 == 0 else "#f8f9fa"
-            
             html += f"""
                 <tr style="background-color: {row_color};">
                     <td style="padding: 8px; border: 1px solid #ddd;">{i}</td>
                     <td style="padding: 8px; border: 1px solid #ddd; font-family: monospace; word-break: break-all;">{email}</td>
                     <td style="padding: 8px; border: 1px solid #ddd;">{status_badge}</td>
                     <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{total}</td>
-                    <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {'color: #dc3545; font-weight: bold;' if pending > 0 else ''}">{pending}</td>
-                    <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {'color: #007bff; font-weight: bold;' if running > 0 else ''}">{running}</td>
-                    <td style="padding: 8px; border: 1px solid #ddd; text-align: center; {'color: #28a745; font-weight: bold;' if completed > 0 else ''}">{completed}</td>
+            """
+            for status_key, _ in status_names:
+                count = status_counts.get(status_key, 0)
+                color = ''
+                if status_key == 'pending' and count > 0:
+                    color = 'color: #dc3545; font-weight: bold;'
+                elif status_key == 'running' and count > 0:
+                    color = 'color: #007bff; font-weight: bold;'
+                elif status_key == 'completed' and count > 0:
+                    color = 'color: #28a745; font-weight: bold;'
+                elif status_key == 'failed' and count > 0:
+                    color = 'color: #b71c1c; font-weight: bold;'
+                elif status_key == 'rejected' and count > 0:
+                    color = 'color: #ff9800; font-weight: bold;'
+                elif status_key == 'timedout' and count > 0:
+                    color = 'color: #888; font-weight: bold;'
+                html += f'<td style="padding: 8px; border: 1px solid #ddd; text-align: center; {color}">{count}</td>'
+            html += f"""
                     <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-size: 0.9em; color: #666;">{activity_str}</td>
                     <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-size: 0.9em; color: #666;">{response_to_me_str}</td>
                 </tr>
             """
-        
         html += """
                 </tbody>
             </table>
@@ -3267,12 +3497,12 @@ class DataSitesCollection:
                                          <strong>💡 Usage:</strong> 
                     <code>q.datasites.responsive_to_me()</code> • 
                     <code>q.datasites.responsive()</code> • 
-                    <code>q.datasites.with_pending_jobs()</code>
+                    <code>q.datasites.with_pending_jobs()</code> • 
+                    <b>Click any column header to sort (coming soon)</b>
                 </small>
             </div>
         </div>
         """
-        
         return html
 
     def help(self):
@@ -3281,12 +3511,16 @@ class DataSitesCollection:
 📡 DataSites Collection Help
 
 Available Methods:
-- q.datasites                        # Show all datasites with code queues
-- q.datasites.responsive_to_me()     # Show datasites that have responded to MY jobs
-- q.datasites.responsive()           # Show datasites that have responded to ANYONE's jobs
-- q.datasites.with_pending_jobs()    # Show datasites with pending jobs
-- q.datasites[0]                     # Get first datasite info
-- len(q.datasites)                   # Count of datasites
+        - q.datasites                        # Show all datasites with code queues (sorted by last response to me)
+        - q.datasites.responsive_to_me()     # Show datasites that have responded to MY jobs
+        - q.datasites.responsive()           # Show datasites that have responded to ANYONE's jobs
+        - q.datasites.with_pending_jobs()    # Show datasites with pending jobs
+        - q.datasites.sort_by('total_jobs')  # Sort by any column (email, total_jobs, pending, etc.)
+        - q.datasites.sort_by('email', reverse=True)  # Sort in reverse order
+        - q.datasites.ping()                 # Ping all datasites in this collection
+        - q.datasites.responsive_to_me().ping()  # Ping only responsive datasites
+        - q.datasites[0]                     # Get first datasite info
+        - len(q.datasites)                   # Count of datasites
 
 DataSite Info Structure:
 - email: Email address of the datasite

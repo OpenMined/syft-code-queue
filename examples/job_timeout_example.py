@@ -99,7 +99,7 @@ print("Analysis complete!")
     print(f"   ✓ Would become: {job.get_timeout_status()}")
     
     print("\n=== Timeout Behavior ===")
-    print("• Pending jobs that timeout → rejected (datasite owner never responded)")
+    print("• Pending jobs that timeout → timedout (datasite owner never responded)")
     print("• Approved/running jobs that timeout → failed (execution timeout)")
     print("• Terminal jobs (completed/failed/rejected) cannot expire")
     print("• Cleanup runs automatically on every syft-code-queue import")

@@ -3505,6 +3505,661 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
         """
         return html
 
+    def jobs_streamlit(self, port=8501, auto_open=True):
+        """Launch a Streamlit app showing all jobs across the network with unicorn rainbow animation for new jobs."""
+        
+        # Check if streamlit is available
+        try:
+            import streamlit
+        except ImportError:
+            print("❌ Streamlit is not installed. Install it with:")
+            print("   pip install streamlit")
+            print("   or")  
+            print("   uv add streamlit")
+            print()
+            print("💡 Alternatively, use q.datasites.jobs_widget() for a Jupyter widget version")
+            return None
+            
+        # Check if streamlit command is available
+        import subprocess
+        import shutil
+        if not shutil.which('streamlit'):
+            print("❌ Streamlit command not found in PATH")
+            print("💡 Try: pip install streamlit")
+            print("💡 Alternatively, use q.datasites.jobs_widget() for a Jupyter widget version")
+            return None
+        
+        import tempfile
+        import os
+        import threading
+        import time
+        import webbrowser
+        import json
+        from datetime import datetime
+        
+        # Create the Streamlit app code
+        streamlit_code = '''
+import streamlit as st
+import json
+import time
+from datetime import datetime
+from pathlib import Path
+
+# Page config
+st.set_page_config(
+    page_title="🌐 Live Jobs Network",
+    page_icon="🌐",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Exact shadcn/ui styling from syft-reviewer-allowlist with unicorn rainbow animation
+st.markdown("""
+<style>
+    /* CSS Custom Properties from syft-reviewer-allowlist */
+    :root {
+        --background: 0 0% 3.9%;
+        --foreground: 0 0% 98%;
+        --card: 0 0% 3.9%;
+        --card-foreground: 0 0% 98%;
+        --primary: 0 0% 98%;
+        --primary-foreground: 0 0% 9%;
+        --secondary: 0 0% 14.9%;
+        --secondary-foreground: 0 0% 98%;
+        --muted: 0 0% 14.9%;
+        --muted-foreground: 0 0% 63.9%;
+        --accent: 0 0% 14.9%;
+        --accent-foreground: 0 0% 98%;
+        --border: 0 0% 14.9%;
+        --radius: 0.5rem;
+    }
+    
+    /* Apply dark theme */
+    .stApp, body {
+        background-color: hsl(var(--background));
+        color: hsl(var(--foreground));
+    }
+    
+    /* Header styling */
+    .jobs-header {
+        margin-bottom: 1.5rem;
+    }
+    
+    .jobs-title {
+        font-size: 1.875rem;
+        font-weight: 700;
+        color: hsl(var(--foreground));
+        margin-bottom: 0;
+        line-height: 1.2;
+    }
+    
+    .jobs-subtitle {
+        color: hsl(var(--muted-foreground));
+        font-size: 0.875rem;
+        margin-top: 0.25rem;
+    }
+    
+    /* Job card styling */
+    .job-card {
+        background-color: hsl(var(--card));
+        border: 1px solid hsl(var(--border));
+        border-radius: var(--radius);
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+        transition: all 0.2s ease;
+    }
+    
+    .job-card:hover {
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    }
+    
+    /* Exact Unicorn Rainbow Animation from syft-reviewer-allowlist */
+    .unicorn-rainbow {
+        position: relative;
+        animation: unicornGlow 3s ease-in-out;
+        overflow: hidden;
+    }
+
+    .unicorn-rainbow::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: linear-gradient(
+            45deg,
+            transparent,
+            rgba(255, 0, 150, 0.3),
+            rgba(255, 100, 0, 0.3),
+            rgba(255, 255, 0, 0.3),
+            rgba(0, 255, 0, 0.3),
+            rgba(0, 150, 255, 0.3),
+            rgba(150, 0, 255, 0.3),
+            transparent
+        );
+        animation: rainbowSweep 3s ease-in-out;
+        pointer-events: none;
+    }
+
+    .unicorn-rainbow::after {
+        content: '🦄✨';
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        font-size: 16px;
+        animation: sparkle 3s ease-in-out;
+        pointer-events: none;
+    }
+
+    @keyframes unicornGlow {
+        0% {
+            box-shadow: 0 0 5px rgba(255, 0, 150, 0.5);
+            transform: scale(1);
+        }
+        25% {
+            box-shadow: 0 0 20px rgba(255, 100, 0, 0.7);
+            transform: scale(1.02);
+        }
+        50% {
+            box-shadow: 0 0 30px rgba(0, 255, 0, 0.7);
+            transform: scale(1.02);
+        }
+        75% {
+            box-shadow: 0 0 20px rgba(0, 150, 255, 0.7);
+            transform: scale(1.02);
+        }
+        100% {
+            box-shadow: 0 0 5px rgba(150, 0, 255, 0.5);
+            transform: scale(1);
+        }
+    }
+
+    @keyframes rainbowSweep {
+        0% {
+            transform: translateX(-100%) rotate(0deg);
+            opacity: 0;
+        }
+        10% {
+            opacity: 1;
+        }
+        90% {
+            opacity: 1;
+        }
+        100% {
+            transform: translateX(100%) rotate(360deg);
+            opacity: 0;
+        }
+    }
+
+    @keyframes sparkle {
+        0%, 100% {
+            opacity: 0;
+            transform: scale(0.5) rotate(0deg);
+        }
+        25% {
+            opacity: 1;
+            transform: scale(1.2) rotate(90deg);
+        }
+        50% {
+            opacity: 0.8;
+            transform: scale(1) rotate(180deg);
+        }
+        75% {
+            opacity: 1;
+            transform: scale(1.3) rotate(270deg);
+        }
+    }
+    
+    /* Status badges */
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: calc(var(--radius) - 2px);
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+    }
+    
+    .status-pending { 
+        border: 1px solid hsl(45 93.4% 47.5%);
+        background-color: hsl(54 91.7% 95.1%);
+        color: hsl(31.8 81% 28.8%);
+    }
+    .status-completed { 
+        border: 1px solid hsl(142.1 76.2% 36.3%);
+        background-color: hsl(138.5 76.5% 96.7%);
+        color: hsl(140.4 85.2% 24.3%);
+    }
+    .status-running { 
+        border: 1px solid hsl(221.2 83.2% 53.3%);
+        background-color: hsl(214.3 31.8% 91.4%);
+        color: hsl(222.2 84% 4.9%);
+    }
+    .status-failed { 
+        border: 1px solid hsl(0 84.2% 60.2%);
+        background-color: hsl(0 85.7% 97.3%);
+        color: hsl(0 74.3% 41.8%);
+    }
+    
+    /* Action buttons */
+    .action-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        white-space: nowrap;
+        border-radius: calc(var(--radius) - 2px);
+        font-size: 0.875rem;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        cursor: pointer;
+        border: 1px solid hsl(var(--border));
+        background-color: hsl(var(--background));
+        color: hsl(var(--foreground));
+        padding: 0.5rem 1rem;
+        gap: 0.25rem;
+        text-decoration: none;
+        margin-right: 0.5rem;
+    }
+    
+    .action-btn:hover {
+        background-color: hsl(var(--accent));
+        color: hsl(var(--accent-foreground));
+    }
+</style>
+""", unsafe_allow_html=True)
+
+def get_all_jobs():
+    """Get all jobs from all datasites"""
+    try:
+        # Use the MockSyftBoxClient from syft_code_queue module
+        from syft_code_queue import SyftBoxClient
+        from syft_code_queue.models import DataSitesCollection
+        syftbox_client = SyftBoxClient.load()
+        
+        datasites = DataSitesCollection(syftbox_client=syftbox_client)
+        
+        all_jobs = []
+        for ds_info in datasites._get_current_data():
+            email = ds_info["email"]
+            queue_path = ds_info["queue_path"]
+            
+            for status in ["pending", "approved", "rejected", "timedout", "running", "completed", "failed"]:
+                status_dir = queue_path / status
+                if not status_dir.exists():
+                    continue
+                    
+                for job_dir in status_dir.iterdir():
+                    if not job_dir.is_dir():
+                        continue
+                        
+                    meta_file = job_dir / "metadata.json"
+                    if not meta_file.exists():
+                        continue
+                        
+                    try:
+                        with open(meta_file) as f:
+                            meta = json.load(f)
+                        meta["status"] = status
+                        meta["datasite"] = email
+                        meta["job_dir"] = str(job_dir)
+                        all_jobs.append(meta)
+                    except Exception as e:
+                        continue
+        
+        # Sort by creation time (newest first)
+        def parse_time(j):
+            v = j.get("created_at", "")
+            if isinstance(v, str) and v:
+                try:
+                    return datetime.fromisoformat(v)
+                except Exception:
+                    return v
+            return v
+        
+        all_jobs.sort(key=parse_time, reverse=True)
+        return all_jobs
+    except Exception as e:
+        st.error(f"Error loading jobs: {e}")
+        return []
+
+def format_time_ago(created_at):
+    """Format time as '2h ago', '3d ago', etc."""
+    try:
+        if not created_at:
+            return "Unknown"
+        created_dt = datetime.fromisoformat(created_at)
+        diff = datetime.now() - created_dt
+        total_seconds = diff.total_seconds()
+        
+        if diff.days > 0:
+            return f"{diff.days}d ago"
+        elif diff.seconds > 3600:
+            return f"{diff.seconds // 3600}h ago"
+        elif diff.seconds > 60:
+            return f"{diff.seconds // 60}m ago"
+        elif total_seconds < 1:
+            return "just now"
+        else:
+            return f"{int(total_seconds)}s ago"
+    except:
+        return "Unknown"
+
+# Main app
+def main():
+    # Initialize session state for tracking new jobs and active filter
+    if 'known_job_uids' not in st.session_state:
+        st.session_state.known_job_uids = set()
+    if 'active_filter' not in st.session_state:
+        st.session_state.active_filter = 'all'
+    if 'first_load' not in st.session_state:
+        st.session_state.first_load = True
+    
+    # Header
+    st.markdown("""
+    <div class="jobs-header">
+        <h1 class="jobs-title">🌐 Live Jobs on Network</h1>
+        <p class="jobs-subtitle">Real-time view of all jobs across the network • Updates every 2 seconds</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Auto-refresh every 2 seconds
+    placeholder = st.empty()
+    
+    while True:
+        with placeholder.container():
+            jobs = get_all_jobs()
+            
+            if not jobs:
+                st.markdown("""
+                <div style="text-align: center; padding: 3rem 1rem; color: hsl(var(--muted-foreground));">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">💼</div>
+                    <h3>No jobs found</h3>
+                    <p>Jobs will appear here when researchers request access to datasets across the network</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                # Track new jobs for unicorn animation (but not on first load)
+                current_job_uids = {job.get("uid", "") for job in jobs}
+                if st.session_state.first_load:
+                    # On first load, don't treat any jobs as "new"
+                    new_job_uids = set()
+                    st.session_state.known_job_uids = current_job_uids
+                    st.session_state.first_load = False
+                else:
+                    # After first load, detect genuinely new jobs
+                    new_job_uids = current_job_uids - st.session_state.known_job_uids
+                    st.session_state.known_job_uids = current_job_uids
+                
+                # Count jobs by status
+                status_counts = {}
+                for job in jobs:
+                    status = job.get("status", "unknown")
+                    status_counts[status] = status_counts.get(status, 0) + 1
+                
+                # Filter buttons
+                col1, col2, col3, col4, col5, col6 = st.columns(6)
+                
+                with col1:
+                    if st.button(f"🔍 All ({len(jobs)})", key="filter_all", use_container_width=True):
+                        st.session_state.active_filter = 'all'
+                with col2:
+                    pending_count = status_counts.get('pending', 0)
+                    if st.button(f"⏳ Pending ({pending_count})", key="filter_pending", use_container_width=True):
+                        st.session_state.active_filter = 'pending'
+                with col3:
+                    running_count = status_counts.get('running', 0) + status_counts.get('approved', 0)
+                    if st.button(f"🏃 Running ({running_count})", key="filter_running", use_container_width=True):
+                        st.session_state.active_filter = 'running'
+                with col4:
+                    completed_count = status_counts.get('completed', 0)
+                    if st.button(f"✅ Completed ({completed_count})", key="filter_completed", use_container_width=True):
+                        st.session_state.active_filter = 'completed'
+                with col5:
+                    failed_count = status_counts.get('failed', 0) + status_counts.get('rejected', 0) + status_counts.get('timedout', 0)
+                    if st.button(f"❌ Failed ({failed_count})", key="filter_failed", use_container_width=True):
+                        st.session_state.active_filter = 'failed'
+                with col6:
+                    if st.button("🔄 Refresh", key="refresh", use_container_width=True):
+                        st.rerun()
+                
+                # Filter jobs based on active filter
+                if st.session_state.active_filter == 'pending':
+                    filtered_jobs = [job for job in jobs if job.get('status', 'pending') == 'pending']
+                    filter_title = "Pending Jobs"
+                elif st.session_state.active_filter == 'running':
+                    filtered_jobs = [job for job in jobs if job.get('status', 'pending') in ['running', 'approved']]
+                    filter_title = "Running Jobs"
+                elif st.session_state.active_filter == 'completed':
+                    filtered_jobs = [job for job in jobs if job.get('status', 'pending') == 'completed']
+                    filter_title = "Completed Jobs"
+                elif st.session_state.active_filter == 'failed':
+                    filtered_jobs = [job for job in jobs if job.get('status', 'pending') in ['failed', 'rejected', 'timedout']]
+                    filter_title = "Failed Jobs"
+                else:
+                    filtered_jobs = jobs
+                    filter_title = "All Jobs"
+                
+                # Display filtered jobs
+                if filtered_jobs:
+                    st.markdown(f"""
+                    <h2 style="color: hsl(var(--foreground)); margin-bottom: 1rem;">{filter_title} ({len(filtered_jobs)})</h2>
+                    """, unsafe_allow_html=True)
+                    
+                    # Jobs in filtered list
+                    for job in filtered_jobs:
+                        uid = job.get("uid", "")
+                        name = job.get("name", "Unnamed Job")
+                        description = job.get("description", "No description")
+                        requester = job.get("requester_email", "")
+                        target = job.get("target_email", "")
+                        created = job.get("created_at", "")
+                        status = job.get("status", "unknown")
+                        
+                        time_display = format_time_ago(created)
+                        
+                        # Apply unicorn rainbow to new jobs
+                        is_new = uid in new_job_uids
+                        unicorn_class = "unicorn-rainbow" if is_new else ""
+                        new_badge = '<span style="font-size: 0.75rem; background: #8b5cf6; color: white; padding: 0.125rem 0.5rem; border-radius: 0.25rem; font-weight: 600; margin-left: 0.5rem;">NEW!</span>' if is_new else ''
+                        
+                        # Job card with shadcn/ui design
+                        job_html = f"""
+                        <div class="job-card {unicorn_class}" data-job-id="{uid}">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
+                                <div>
+                                    <h3 style="font-size: 1.125rem; font-weight: 600; color: hsl(var(--card-foreground)); margin-bottom: 0.25rem; line-height: 1.25;">{name}</h3>
+                                    <p style="color: hsl(var(--muted-foreground)); font-size: 0.875rem; line-height: 1.25rem;">{description}</p>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span class="status-badge status-{status}">{status}</span>
+                                    {new_badge}
+                                </div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+                                <div style="color: hsl(var(--muted-foreground)); font-size: 0.875rem;">
+                                    Requested {time_display} by {requester} → {target}
+                                </div>
+                                <div style="display: flex; gap: 0.5rem;">
+                        """
+                        
+                        # Add action buttons based on status
+                        if status == "pending":
+                            cmd = f'q.get_job("{uid}").review()'
+                            job_html += f'<button class="action-btn" onclick="copyToClipboard(\\'{cmd}\\')">👁️ Review</button>'
+                        elif status in ["completed", "running"]:
+                            logs_cmd = f'q.get_job("{uid}").get_logs()'
+                            output_cmd = f'q.get_job("{uid}").get_output()'
+                            job_html += f'<button class="action-btn" onclick="copyToClipboard(\\'{logs_cmd}\\')">📜 Logs</button>'
+                            job_html += f'<button class="action-btn" onclick="copyToClipboard(\\'{output_cmd}\\')">📁 Output</button>'
+                        
+                        job_html += """
+                                </div>
+                            </div>
+                        </div>
+                        """
+                        
+                        st.markdown(job_html, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div style="text-align: center; padding: 3rem 1rem; color: hsl(var(--muted-foreground));">
+                        <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
+                        <h3>No {filter_title.lower()} found</h3>
+                        <p>Try selecting a different filter to see jobs in other statuses</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Add JavaScript for clipboard functionality and remove unicorn animation after 3 seconds
+        st.markdown("""
+        <script>
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(function() {
+                console.log('Copied to clipboard: ' + text);
+            }).catch(function(err) {
+                console.error('Could not copy text: ', err);
+            });
+        }
+        
+        // Remove unicorn rainbow animation after 3 seconds
+        setTimeout(function() {
+            var unicornElements = document.querySelectorAll('.unicorn-rainbow');
+            unicornElements.forEach(function(element) {
+                element.classList.remove('unicorn-rainbow');
+            });
+        }, 3000);
+        
+        // Also remove any lingering unicorn elements on page refresh
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                var unicornElements = document.querySelectorAll('.unicorn-rainbow');
+                unicornElements.forEach(function(element) {
+                    element.classList.remove('unicorn-rainbow');
+                });
+            }, 100);
+        });
+        </script>
+        """, unsafe_allow_html=True)
+        
+        # Wait 2 seconds before next update
+        time.sleep(2)
+
+if __name__ == "__main__":
+    main()
+'''
+        
+        # Write the Streamlit app to a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(streamlit_code)
+            temp_file = f.name
+        
+        def run_streamlit():
+            """Run Streamlit in a separate process"""
+            try:
+                # Run streamlit
+                cmd = f"streamlit run {temp_file} --server.port {port} --server.headless true"
+                subprocess.run(cmd, shell=True, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"Error running Streamlit: {e}")
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+        
+        # Start Streamlit in background thread
+        streamlit_thread = threading.Thread(target=run_streamlit, daemon=True)
+        streamlit_thread.start()
+        
+        # Wait a moment for Streamlit to start, then open browser
+        if auto_open:
+            time.sleep(3)
+            webbrowser.open(f"http://localhost:{port}")
+            
+        print(f"✅ Streamlit is installed and working!")
+        print(f"🌐 Live Jobs Network launched at http://localhost:{port}")
+        print("💡 The app will auto-refresh every 2 seconds")
+        print("🦄 New jobs get the unicorn rainbow animation from syft-reviewer-allowlist!")
+        print("🛑 Press Ctrl+C in the terminal to stop the server")
+        
+        return f"http://localhost:{port}"
+
+    def jobs_ui(self, port=8002, auto_open=True):
+        """
+        Launch the Syft Code Queue web UI for browsing jobs across the network.
+        
+        This starts a FastAPI backend with Next.js frontend that provides:
+        - Live job browsing with auto-refresh
+        - Job filtering by status and sender
+        - Detailed job view with file contents
+        - Interactive action buttons for review/logs/output
+        - Beautiful shadcn/ui design
+        
+        Args:
+            port: Port to run the web UI on (default: 8002)
+            auto_open: Whether to automatically open the browser (default: True)
+            
+        Returns:
+            URL of the launched web UI
+        """
+        import subprocess
+        import threading
+        import time
+        import webbrowser
+        import os
+        from pathlib import Path
+        
+        # Get the syft-code-queue package directory
+        try:
+            import syft_code_queue
+            package_dir = Path(syft_code_queue.__file__).parent.parent.parent
+        except:
+            # Fallback to current directory
+            package_dir = Path.cwd()
+        
+        print(f"🚀 Starting Syft Code Queue Web UI...")
+        print(f"📁 Package directory: {package_dir}")
+        
+        def run_ui_server():
+            """Run the web UI server in a separate process"""
+            try:
+                # Change to the package directory
+                os.chdir(package_dir)
+                
+                # Set the port environment variable
+                env = os.environ.copy()
+                env['SYFTBOX_ASSIGNED_PORT'] = str(port)
+                
+                # Run the startup script
+                cmd = ["bash", "run.sh"]
+                subprocess.run(cmd, env=env, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Error running web UI: {e}")
+                print(f"💡 Make sure you're in the syft-code-queue directory and run.sh exists")
+            except FileNotFoundError:
+                print(f"❌ Could not find run.sh script in {package_dir}")
+                print(f"💡 Please ensure you're running from the syft-code-queue package directory")
+        
+        # Start UI server in background thread
+        ui_thread = threading.Thread(target=run_ui_server, daemon=True)
+        ui_thread.start()
+        
+        # Wait a moment for the server to start, then open browser
+        if auto_open:
+            time.sleep(5)  # Give more time for the full stack to start
+            webbrowser.open(f"http://localhost:{port}")
+            
+        print(f"✅ Syft Code Queue Web UI is starting!")
+        print(f"🌐 Web UI will be available at http://localhost:{port}")
+        print("💡 The UI will auto-refresh and show live job data")
+        print("🎨 Beautiful shadcn/ui design with job filtering and details")
+        print("🛑 Press Ctrl+C in the terminal to stop the server")
+        
+        return f"http://localhost:{port}"
+
     def help(self):
         """Show help for using the datasites collection."""
         help_text = """

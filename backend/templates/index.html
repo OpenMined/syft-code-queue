@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syft Reviewer Allowlist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/prismjs@1.29.0/components/prism-core.min.js"></script>
+    <script src="https://unpkg.com/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <link href="https://unpkg.com/prismjs@1.29.0/themes/prism-tomorrow.css" rel="stylesheet">
+    <style>
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .tab-button.active { 
+            background-color: #3b82f6; 
+            color: white; 
+        }
+        
+        /* IDE-style layout */
+        .ide-layout {
+            height: calc(100vh - 120px);
+            display: flex;
+        }
+        
+        .sidebar {
+            width: 320px;
+            min-width: 250px;
+            max-width: 500px;
+            background: #f8fafc;
+            border-right: 1px solid #e2e8f0;
+            overflow-y: auto;
+            resize: horizontal;
+        }
+        
+        .main-content {
+            flex: 1;
+            background: white;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .editor-header {
+            background: #f1f5f9;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #475569;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .editor-content {
+            flex: 1;
+            overflow: auto;
+            padding: 0;
+        }
+        
+        /* Job tree styles */
+        .job-tree-item {
+            user-select: none;
+        }
+        
+        .job-header {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-radius: 6px;
+            margin: 2px 0;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .job-header:hover {
+            background: #e2e8f0;
+        }
+        
+        .job-header.selected {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .job-expand-icon {
+            width: 16px;
+            height: 16px;
+            transition: transform 0.15s;
+            flex-shrink: 0;
+        }
+        
+        .job-expand-icon.expanded {
+            transform: rotate(90deg);
+        }
+        
+        .file-list {
+            margin-left: 24px;
+            border-left: 1px solid #e2e8f0;
+            padding-left: 8px;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.2s ease-out;
+        }
+        
+        .file-list.expanded {
+            max-height: 200px;
+        }
+        
+        .file-item {
+            padding: 4px 8px;
+            cursor: pointer;
+            border-radius: 4px;
+            margin: 1px 0;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+        }
+        
+        .file-item:hover {
+            background: #f1f5f9;
+        }
+        
+        .file-item.selected {
+            background: #dbeafe;
+            color: #1e40af;
+            font-weight: 500;
+        }
+        
+        /* Code viewer styles */
+        .code-viewer {
+            background: #1e293b;
+            color: #e2e8f0;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            height: 100%;
+            overflow: auto;
+        }
+        
+        .code-viewer pre {
+            margin: 0;
+            padding: 20px;
+            background: transparent;
+        }
+        
+        .code-viewer code {
+            background: transparent;
+            color: inherit;
+        }
+        
+        /* Empty state */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #64748b;
+            text-align: center;
+            padding: 40px;
+        }
+        
+        /* Custom scrollbar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        
+        /* Trusted status indicator */
+        .trusted-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .trusted-badge.trusted {
+            background: #dcfce7;
+            color: #166534;
+        }
+        
+        .trusted-badge.untrusted {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        /* Unicorn Rainbow Animation for New Decisions */
+        .unicorn-rainbow {
+            position: relative;
+            animation: unicornGlow 3s ease-in-out;
+            overflow: hidden;
+        }
+
+        .unicorn-rainbow::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(
+                45deg,
+                transparent,
+                rgba(255, 0, 150, 0.3),
+                rgba(255, 100, 0, 0.3),
+                rgba(255, 255, 0, 0.3),
+                rgba(0, 255, 0, 0.3),
+                rgba(0, 150, 255, 0.3),
+                rgba(150, 0, 255, 0.3),
+                transparent
+            );
+            animation: rainbowSweep 3s ease-in-out;
+            pointer-events: none;
+        }
+
+        .unicorn-rainbow::after {
+            content: '🦄✨';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 16px;
+            animation: sparkle 3s ease-in-out;
+            pointer-events: none;
+        }
+
+        @keyframes unicornGlow {
+            0% {
+                box-shadow: 0 0 5px rgba(255, 0, 150, 0.5);
+                transform: scale(1);
+            }
+            25% {
+                box-shadow: 0 0 20px rgba(255, 100, 0, 0.7);
+                transform: scale(1.02);
+            }
+            50% {
+                box-shadow: 0 0 30px rgba(0, 255, 0, 0.7);
+                transform: scale(1.02);
+            }
+            75% {
+                box-shadow: 0 0 20px rgba(0, 150, 255, 0.7);
+                transform: scale(1.02);
+            }
+            100% {
+                box-shadow: 0 0 5px rgba(150, 0, 255, 0.5);
+                transform: scale(1);
+            }
+        }
+
+        @keyframes rainbowSweep {
+            0% {
+                transform: translateX(-100%) rotate(0deg);
+                opacity: 0;
+            }
+            10% {
+                opacity: 1;
+            }
+            90% {
+                opacity: 1;
+            }
+            100% {
+                transform: translateX(100%) rotate(360deg);
+                opacity: 0;
+            }
+        }
+
+        @keyframes sparkle {
+            0%, 100% {
+                opacity: 0;
+                transform: scale(0.5) rotate(0deg);
+            }
+            25% {
+                opacity: 1;
+                transform: scale(1.2) rotate(90deg);
+            }
+            50% {
+                opacity: 0.8;
+                transform: scale(1) rotate(180deg);
+            }
+            75% {
+                opacity: 1;
+                transform: scale(1.3) rotate(270deg);
+            }
+        }
+
+        /* Pulse animation for decision count badge */
+        .decision-count-pulse {
+            animation: decisionPulse 0.6s ease-in-out;
+        }
+
+        @keyframes decisionPulse {
+            0% {
+                transform: scale(1);
+                background-color: #10b981;
+            }
+            50% {
+                transform: scale(1.3);
+                background-color: #f59e0b;
+            }
+            100% {
+                transform: scale(1);
+                background-color: #10b981;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-6 max-w-7xl">
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow-sm p-6 mb-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900 flex items-center">
+                        🛡️ Syft Reviewer Allowlist
+                    </h1>
+                    <p class="text-gray-600 text-sm mt-1">Auto-approval management for code job reviews</p>
+                </div>
+                <div class="text-right">
+                    <div class="text-sm text-gray-500">Status</div>
+                    <div id="appStatus" class="text-green-600 font-medium">Loading...</div>
+                    <div id="userEmail" class="text-xs text-gray-400 mt-1">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="bg-white rounded-lg shadow-sm mb-4">
+            <div class="border-b border-gray-200">
+                <nav class="-mb-px flex space-x-8 px-6" aria-label="Tabs">
+                    <button id="emailTab" class="tab-button py-3 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm active" onclick="switchTab('email')">
+                        📧 Email Allowlist
+                    </button>
+                    <button id="codeReviewTab" class="tab-button py-3 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm" onclick="switchTab('codeReview')">
+                        👨‍💻 Code Review
+                        <span id="historyJobsCount" class="ml-2 bg-blue-500 text-white text-xs rounded-full px-2 py-1 hidden">0</span>
+                    </button>
+                    <button id="decisionHistoryTab" class="tab-button py-3 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium text-sm" onclick="switchTab('decisionHistory')">
+                        📋 Decision History
+                        <span id="liveIndicator" class="text-xs text-green-500 hidden animate-pulse">●</span>
+                        <span id="decisionCount" class="ml-2 bg-green-500 text-white text-xs rounded-full px-2 py-1 hidden">0</span>
+                    </button>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="bg-white rounded-lg shadow-sm">
+            <!-- Email Allowlist Tab -->
+            <div id="emailTabContent" class="tab-content active p-6">
+                <div class="max-w-2xl">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">
+                        📧 Email Allowlist
+                    </h2>
+                    
+                    <div class="mb-6">
+                        <div class="flex space-x-3">
+                            <input 
+                                type="email" 
+                                id="emailInput" 
+                                placeholder="Enter email address (e.g., user@example.com)"
+                                class="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            >
+                            <button 
+                                id="addEmailButton"
+                                class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 font-medium"
+                            >
+                                Add
+                            </button>
+                        </div>
+                        <p class="text-sm text-gray-500 mt-2">Jobs from these senders will be automatically approved</p>
+                    </div>
+
+                    <div class="mb-4">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-medium text-gray-700">Trusted Senders</h3>
+                            <span id="allowlistCount" class="text-xs text-gray-500">0 emails</span>
+                        </div>
+                    </div>
+
+                    <div id="emailList" class="space-y-2">
+                        <!-- Email list will be populated here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Code Review Tab -->
+            <div id="codeReviewTabContent" class="tab-content hidden">
+                <div class="ide-layout">
+                    <!-- Sidebar - Job Explorer -->
+                    <div class="sidebar custom-scrollbar">
+                        <div class="p-4 border-b border-gray-200">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-sm font-semibold text-gray-700">📋 Completed Jobs</h3>
+                                <button onclick="refreshCodeReviewData()" class="text-gray-400 hover:text-gray-600 p-1 rounded">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">Select a job to review its code</p>
+                        </div>
+                        
+                        <div id="jobTreeContainer" class="p-2">
+                            <!-- Job tree will be populated here -->
+                        </div>
+                    </div>
+
+                    <!-- Main Content - Code Viewer -->
+                    <div class="main-content">
+                        <div class="editor-header">
+                            <div class="flex items-center">
+                                <span id="currentFileName" class="text-gray-400">No file selected</span>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <button onclick="refreshJobContent()" 
+                                        class="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">
+                                    🔄 Refresh Content
+                                </button>
+                                <div id="jobActions" class="flex items-center space-x-2 hidden">
+                                    <span id="trustedStatus" class="trusted-badge untrusted">untrusted</span>
+                                    <button id="markTrustedBtn" onclick="markJobAsTrusted()" 
+                                            class="text-xs bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700">
+                                        ✨ Mark Trusted
+                                    </button>
+                                    <button id="unmarkTrustedBtn" onclick="unmarkJobTrusted()" 
+                                            class="text-xs bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700 hidden">
+                                        ❌ Remove Trust
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="editor-content">
+                            <div id="emptyCodeState" class="empty-state">
+                                <div class="text-6xl mb-4">👨‍💻</div>
+                                <h3 class="text-lg font-medium text-gray-700 mb-2">Select a job to review</h3>
+                                <p class="text-gray-500">Choose a completed job from the sidebar to inspect its code</p>
+                            </div>
+                            
+                            <div id="codeViewer" class="code-viewer hidden">
+                                <pre><code id="codeContent" class="language-python">// Code will appear here</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Decision History Tab -->
+            <div id="decisionHistoryTabContent" class="tab-content hidden p-6">
+                <div class="max-w-6xl">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 class="text-lg font-semibold text-gray-900 mb-2">
+                                📋 Decision History
+                            </h2>
+                            <p class="text-gray-600 text-sm">Review all decisions made by the auto-approval system</p>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="refreshDecisionHistory()" 
+                                    class="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">
+                                🔄 Refresh
+                            </button>
+                            <button onclick="clearOldDecisions()" 
+                                    class="text-xs bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700">
+                                🗑️ Clear Old (30+ days)
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="decisionHistoryContent" class="space-y-3">
+                        <!-- Decision history will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let currentTab = 'email';
+        let allowlistData = [];
+        let jobsData = [];
+        let decisionHistoryData = [];
+        let previousDecisionIds = new Set(); // Track previously seen decisions
+        let currentSelectedJob = null;
+        let currentSelectedFile = null;
+        let decisionHistoryInterval = null; // For auto-updating
+
+        // Initialize app
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStatus();
+            loadAllowlist();
+            
+            // Add event listeners
+            document.getElementById('addEmailButton').addEventListener('click', addEmail);
+            document.getElementById('emailInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') addEmail();
+            });
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (decisionHistoryInterval) {
+                clearInterval(decisionHistoryInterval);
+            }
+        });
+
+        // Tab switching
+        function switchTab(tab) {
+            // Clear any existing auto-update intervals
+            if (decisionHistoryInterval) {
+                clearInterval(decisionHistoryInterval);
+                decisionHistoryInterval = null;
+            }
+            
+            // Hide live indicator
+            document.getElementById('liveIndicator').classList.add('hidden');
+            
+            // Update tab buttons
+            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            if (tab === 'email') {
+                document.getElementById('emailTab').classList.add('active');
+                document.getElementById('emailTabContent').classList.add('active');
+            } else if (tab === 'codeReview') {
+                document.getElementById('codeReviewTab').classList.add('active');
+                document.getElementById('codeReviewTabContent').classList.add('active');
+                loadJobsForReview();
+            } else if (tab === 'decisionHistory') {
+                document.getElementById('decisionHistoryTab').classList.add('active');
+                document.getElementById('decisionHistoryTabContent').classList.add('active');
+                loadDecisionHistory();
+                
+                // Show live indicator
+                document.getElementById('liveIndicator').classList.remove('hidden');
+                
+                // Start auto-updating decision history every 3 seconds
+                decisionHistoryInterval = setInterval(() => {
+                    loadDecisionHistory(true); // Pass true for silent update
+                }, 3000);
+            }
+            currentTab = tab;
+        }
+
+        // Load app status
+        async function loadStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                document.getElementById('appStatus').textContent = 'Running';
+                document.getElementById('userEmail').textContent = data.syftbox?.user_email || 'Unknown';
+            } catch (error) {
+                console.error('Error loading status:', error);
+                document.getElementById('appStatus').textContent = 'Error';
+            }
+        }
+
+        // Email allowlist functions
+        async function loadAllowlist() {
+            try {
+                const response = await fetch('/api/v1/allowlist');
+                const data = await response.json();
+                allowlistData = data.emails || [];
+                renderAllowlist();
+            } catch (error) {
+                console.error('Error loading allowlist:', error);
+            }
+        }
+
+        function renderAllowlist() {
+            const emailList = document.getElementById('emailList');
+            const allowlistCount = document.getElementById('allowlistCount');
+            
+            allowlistCount.textContent = `${allowlistData.length} emails`;
+            
+            if (allowlistData.length === 0) {
+                emailList.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <div class="text-2xl mb-2">📭</div>
+                        <p>No trusted senders yet</p>
+                        <p class="text-sm">Add an email address above to get started</p>
+                    </div>
+                `;
+                return;
+            }
+
+            emailList.innerHTML = allowlistData.map(email => `
+                <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
+                    <div class="flex items-center">
+                        <span class="text-green-600 mr-2">✅</span>
+                        <span class="font-medium">${email}</span>
+                    </div>
+                    <button onclick="removeEmail('${email}')" 
+                            class="text-red-600 hover:text-red-800 text-sm">
+                        Remove
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        async function addEmail() {
+            const emailInput = document.getElementById('emailInput');
+            const email = emailInput.value.trim();
+            
+            if (!email || !isValidEmail(email)) {
+                alert('Please enter a valid email address');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/v1/allowlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+
+                if (response.ok) {
+                    emailInput.value = '';
+                    loadAllowlist();
+                } else {
+                    alert('Error adding email');
+                }
+            } catch (error) {
+                console.error('Error adding email:', error);
+                alert('Error adding email');
+            }
+        }
+
+        async function removeEmail(email) {
+            try {
+                const response = await fetch(`/api/v1/allowlist/${encodeURIComponent(email)}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    loadAllowlist();
+                } else {
+                    alert('Error removing email');
+                }
+            } catch (error) {
+                console.error('Error removing email:', error);
+                alert('Error removing email');
+            }
+        }
+
+        function isValidEmail(email) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        }
+
+        // Code review functions
+        async function loadJobsForReview() {
+            try {
+                const response = await fetch('/api/v1/jobs/history-for-review');
+                const data = await response.json();
+                jobsData = data.jobs || [];
+                renderJobTree();
+                updateJobCount();
+            } catch (error) {
+                console.error('Error loading jobs:', error);
+            }
+        }
+
+        function renderJobTree() {
+            const container = document.getElementById('jobTreeContainer');
+            
+            if (jobsData.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <div class="text-2xl mb-2">📄</div>
+                        <p class="text-sm">No completed jobs yet</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = jobsData.map((job, index) => `
+                <div class="job-tree-item mb-2">
+                    <div class="job-header ${currentSelectedJob === job ? 'selected' : ''}" 
+                         onclick="toggleJob(${index})">
+                        <svg class="job-expand-icon ${isJobExpanded(job) ? 'expanded' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                        <span class="flex-1 text-sm font-medium truncate">${job.name}</span>
+                        <span class="trusted-badge ${job.is_trusted ? 'trusted' : 'untrusted'}">${job.is_trusted ? 'trusted' : 'review'}</span>
+                    </div>
+                    <div class="file-list ${isJobExpanded(job) ? 'expanded' : ''}">
+                        ${Object.keys(job.code_files || {}).map(fileName => `
+                            <div class="file-item ${currentSelectedFile === fileName && currentSelectedJob === job ? 'selected' : ''}" 
+                                 onclick="selectFile('${fileName}', ${index})">
+                                <span class="file-icon">${getFileIcon(fileName)}</span>
+                                <span class="text-sm">${fileName}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function isJobExpanded(job) {
+            return currentSelectedJob === job;
+        }
+
+        function toggleJob(jobIndex) {
+            const job = jobsData[jobIndex];
+            if (currentSelectedJob === job) {
+                currentSelectedJob = null;
+                currentSelectedFile = null;
+                showEmptyState();
+            } else {
+                currentSelectedJob = job;
+                currentSelectedFile = null;
+                // Auto-select first file if available
+                const files = Object.keys(job.code_files || {});
+                if (files.length > 0) {
+                    selectFile(files[0], jobIndex);
+                }
+            }
+            renderJobTree();
+        }
+
+        async function selectFile(fileName, jobIndex) {
+            const job = jobsData[jobIndex];
+            currentSelectedJob = job;
+            currentSelectedFile = fileName;
+            
+            renderJobTree();
+            
+            // Try to fetch the file content via API to get the most up-to-date version
+            try {
+                const response = await fetch(`/api/v1/jobs/history/${job.signature}/files/${encodeURIComponent(fileName)}`);
+                if (response.ok) {
+                    const fileData = await response.json();
+                    displayFileContent(fileName, fileData.content, fileData.is_dummy || false);
+                } else {
+                    // Fallback to stored content
+                    displayFileContent(fileName, job.code_files[fileName]);
+                }
+            } catch (error) {
+                console.warn('Failed to fetch file content via API, using stored content:', error);
+                displayFileContent(fileName, job.code_files[fileName]);
+            }
+            
+            updateJobActions(job);
+        }
+
+        function displayFileContent(fileName, content, isDummy = false) {
+            document.getElementById('emptyCodeState').style.display = 'none';
+            document.getElementById('codeViewer').classList.remove('hidden');
+            
+            // Update file name with dummy indicator
+            const fileNameElement = document.getElementById('currentFileName');
+            if (isDummy) {
+                fileNameElement.innerHTML = `${fileName} <span style="color: #f59e0b; font-size: 11px; font-weight: bold;">[DEMO CONTENT]</span>`;
+            } else {
+                fileNameElement.textContent = fileName;
+            }
+            
+            const codeElement = document.getElementById('codeContent');
+            codeElement.textContent = content;
+            codeElement.className = `language-${getLanguageFromFile(fileName)}`;
+            
+            // Re-highlight with Prism
+            Prism.highlightElement(codeElement);
+        }
+
+        function showEmptyState() {
+            document.getElementById('emptyCodeState').style.display = 'flex';
+            document.getElementById('codeViewer').classList.add('hidden');
+            document.getElementById('currentFileName').textContent = 'No file selected';
+            document.getElementById('jobActions').classList.add('hidden');
+        }
+
+        function updateJobActions(job) {
+            const jobActions = document.getElementById('jobActions');
+            const trustedStatus = document.getElementById('trustedStatus');
+            const markBtn = document.getElementById('markTrustedBtn');
+            const unmarkBtn = document.getElementById('unmarkTrustedBtn');
+            
+            jobActions.classList.remove('hidden');
+            
+            if (job.is_trusted) {
+                trustedStatus.textContent = 'trusted';
+                trustedStatus.className = 'trusted-badge trusted';
+                markBtn.classList.add('hidden');
+                unmarkBtn.classList.remove('hidden');
+            } else {
+                trustedStatus.textContent = 'review';
+                trustedStatus.className = 'trusted-badge untrusted';
+                markBtn.classList.remove('hidden');
+                unmarkBtn.classList.add('hidden');
+            }
+        }
+
+        async function markJobAsTrusted() {
+            if (!currentSelectedJob) return;
+            
+            try {
+                const response = await fetch(`/api/v1/jobs/history/${currentSelectedJob.signature}/mark-trusted`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: 'Code reviewed and approved via UI' })
+                });
+
+                if (response.ok) {
+                    loadJobsForReview(); // Refresh data
+                } else {
+                    alert('Error marking job as trusted');
+                }
+            } catch (error) {
+                console.error('Error marking job as trusted:', error);
+                alert('Error marking job as trusted');
+            }
+        }
+
+        async function unmarkJobTrusted() {
+            if (!currentSelectedJob) return;
+            
+            try {
+                const response = await fetch(`/api/v1/trusted-code/unmark/${currentSelectedJob.signature}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    loadJobsForReview(); // Refresh data
+                } else {
+                    alert('Error removing trusted status');
+                }
+            } catch (error) {
+                console.error('Error removing trusted status:', error);
+                alert('Error removing trusted status');
+            }
+        }
+
+        async function refreshJobContent() {
+            try {
+                showNotification('Refreshing job content...', 'info');
+                const response = await fetch('/api/v1/jobs/history/refresh-content', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    showNotification(result.message, 'success');
+                    await loadJobsForReview(); // Reload to show refreshed content
+                    
+                    // If we have a file selected, re-select it to show updated content
+                    if (currentSelectedFile && currentSelectedJob) {
+                        const jobIndex = jobsData.findIndex(job => job.signature === currentSelectedJob.signature);
+                        if (jobIndex >= 0) {
+                            await selectFile(currentSelectedFile, jobIndex);
+                        }
+                    }
+                } else {
+                    const error = await response.text();
+                    alert(`Failed to refresh content: ${error}`);
+                }
+            } catch (error) {
+                alert('Error refreshing content');
+                console.error('Refresh error:', error);
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            // Simple notification - you could enhance this with a proper notification system
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        function refreshCodeReviewData() {
+            loadJobsForReview();
+        }
+
+        // Decision History Functions
+        async function loadDecisionHistory(silentUpdate = false) {
+            try {
+                const response = await fetch('/api/v1/decisions/history?limit=100');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const newDecisions = data.decisions || [];
+                    
+                    // Detect new decisions
+                    const newDecisionIds = new Set();
+                    const newlyAdded = [];
+                    
+                    newDecisions.forEach(decision => {
+                        const decisionId = decision.decision_id || decision.timestamp;
+                        newDecisionIds.add(decisionId);
+                        
+                        // If this is a decision we haven't seen before
+                        if (!previousDecisionIds.has(decisionId)) {
+                            newlyAdded.push(decision);
+                        }
+                    });
+                    
+                    // Update our tracking
+                    previousDecisionIds = newDecisionIds;
+                    decisionHistoryData = newDecisions;
+                    
+                    // Render with new decision indicators
+                    renderDecisionHistory(newlyAdded);
+                    updateDecisionCount(newlyAdded.length > 0);
+                    
+                    // Show a subtle notification for new decisions (only during silent updates)
+                    if (silentUpdate && newlyAdded.length > 0) {
+                        console.log(`🦄 ${newlyAdded.length} new decision(s) added with unicorn magic!`);
+                    }
+                } else if (!silentUpdate) {
+                    console.error('Failed to load decision history');
+                    document.getElementById('decisionHistoryContent').innerHTML = 
+                        '<div class="text-center py-8 text-red-500">Failed to load decision history</div>';
+                }
+            } catch (error) {
+                if (!silentUpdate) {
+                    console.error('Error loading decision history:', error);
+                    document.getElementById('decisionHistoryContent').innerHTML = 
+                        '<div class="text-center py-8 text-red-500">Error loading decision history</div>';
+                }
+            }
+        }
+
+        function renderDecisionHistory(newlyAdded = []) {
+            const container = document.getElementById('decisionHistoryContent');
+            
+            if (decisionHistoryData.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <div class="text-4xl mb-4">📋</div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-2">No decisions recorded yet</h3>
+                        <p class="text-gray-500">Decision history will appear here as the system processes jobs</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Create a set of new decision IDs for quick lookup
+            const newDecisionIds = new Set(newlyAdded.map(d => d.decision_id || d.timestamp));
+
+            container.innerHTML = decisionHistoryData.map(decision => {
+                const timestamp = new Date(decision.timestamp).toLocaleString();
+                const actionColor = getActionColor(decision.action);
+                const actionIcon = getActionIcon(decision.action);
+                const decisionId = decision.decision_id || decision.timestamp;
+                const isNew = newDecisionIds.has(decisionId);
+                
+                return `
+                    <div class="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow ${isNew ? 'unicorn-rainbow' : ''}" data-decision-id="${decisionId}">
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1">
+                                <div class="flex items-center space-x-3 mb-2">
+                                    <span class="text-lg">${actionIcon}</span>
+                                    <span class="px-2 py-1 text-xs font-semibold rounded-full ${actionColor}">
+                                        ${decision.action.toUpperCase()}
+                                    </span>
+                                    <span class="text-sm text-gray-500">${timestamp}</span>
+                                    ${isNew ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full font-semibold">NEW!</span>' : ''}
+                                </div>
+                                
+                                <div class="space-y-1">
+                                    <div class="flex items-center space-x-2">
+                                        <strong class="text-gray-900">${decision.job_name || 'Unknown Job'}</strong>
+                                        ${decision.requester_email ? `<span class="text-sm text-gray-600">from ${decision.requester_email}</span>` : ''}
+                                    </div>
+                                    
+                                    <div class="text-sm text-gray-700">
+                                        <strong>Reason:</strong> ${decision.reason}
+                                    </div>
+                                    
+                                    ${decision.job_description ? `
+                                        <div class="text-sm text-gray-600">
+                                            <strong>Description:</strong> ${decision.job_description}
+                                        </div>
+                                    ` : ''}
+                                    
+                                    <div class="flex items-center space-x-4 text-xs text-gray-500 mt-2">
+                                        ${decision.file_count ? `<span>📁 ${decision.file_count} files</span>` : ''}
+                                        ${decision.job_tags && decision.job_tags.length > 0 ? `
+                                            <span>🏷️ ${decision.job_tags.join(', ')}</span>
+                                        ` : ''}
+                                        ${decision.job_uid ? `<span>🆔 ${decision.job_uid.substring(0, 8)}...</span>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Remove unicorn rainbow animation after 3 seconds for new items
+            if (newlyAdded.length > 0) {
+                setTimeout(() => {
+                    newDecisionIds.forEach(decisionId => {
+                        const element = document.querySelector(`[data-decision-id="${decisionId}"]`);
+                        if (element) {
+                            element.classList.remove('unicorn-rainbow');
+                        }
+                    });
+                }, 3000);
+            }
+        }
+
+        function getActionColor(action) {
+            switch (action) {
+                case 'approve':
+                    return 'bg-green-100 text-green-800';
+                case 'deny':
+                    return 'bg-red-100 text-red-800';
+                case 'ignore':
+                    return 'bg-yellow-100 text-yellow-800';
+                case 'failed_approval':
+                    return 'bg-orange-100 text-orange-800';
+                default:
+                    return 'bg-gray-100 text-gray-800';
+            }
+        }
+
+        function getActionIcon(action) {
+            switch (action) {
+                case 'approve':
+                    return '✅';
+                case 'deny':
+                    return '❌';
+                case 'ignore':
+                    return '⏭️';
+                case 'failed_approval':
+                    return '⚠️';
+                default:
+                    return '📋';
+            }
+        }
+
+        function updateDecisionCount(hasNewDecisions = false) {
+            const countElement = document.getElementById('decisionCount');
+            if (decisionHistoryData.length > 0) {
+                countElement.textContent = decisionHistoryData.length;
+                countElement.classList.remove('hidden');
+                
+                // Add pulse animation if there are new decisions
+                if (hasNewDecisions) {
+                    countElement.classList.add('decision-count-pulse');
+                    setTimeout(() => {
+                        countElement.classList.remove('decision-count-pulse');
+                    }, 600);
+                }
+            } else {
+                countElement.classList.add('hidden');
+            }
+        }
+
+        function refreshDecisionHistory() {
+            // Reset tracking so no decisions appear as "new" after manual refresh
+            previousDecisionIds.clear();
+            loadDecisionHistory();
+        }
+
+        async function clearOldDecisions() {
+            if (!confirm('This will permanently delete decision records older than 30 days. Continue?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/v1/decisions/history/clear?keep_days=30', {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    alert(result.message);
+                    refreshDecisionHistory(); // Refresh the display
+                } else {
+                    alert('Failed to clear old decisions');
+                }
+            } catch (error) {
+                console.error('Error clearing old decisions:', error);
+                alert('Error clearing old decisions');
+            }
+        }
+
+        function updateJobCount() {
+            const countElement = document.getElementById('historyJobsCount');
+            if (jobsData.length > 0) {
+                countElement.textContent = jobsData.length;
+                countElement.classList.remove('hidden');
+            } else {
+                countElement.classList.add('hidden');
+            }
+        }
+
+        // Utility functions
+        function getFileIcon(fileName) {
+            const ext = fileName.split('.').pop().toLowerCase();
+            switch (ext) {
+                case 'py': return '🐍';
+                case 'js': return '📜';
+                case 'ts': return '📘';
+                case 'sh': return '⚡';
+                case 'md': return '📝';
+                case 'json': return '📋';
+                case 'yml':
+                case 'yaml': return '⚙️';
+                case 'sql': return '🗃️';
+                case 'csv': return '📊';
+                default: return '📄';
+            }
+        }
+
+        function getLanguageFromFile(fileName) {
+            const ext = fileName.split('.').pop().toLowerCase();
+            switch (ext) {
+                case 'py': return 'python';
+                case 'js': return 'javascript';
+                case 'ts': return 'typescript';
+                case 'sh': return 'bash';
+                case 'md': return 'markdown';
+                case 'json': return 'json';
+                case 'yml':
+                case 'yaml': return 'yaml';
+                case 'sql': return 'sql';
+                default: return 'text';
+            }
+        }
+    </script>
+</body>
+</html>

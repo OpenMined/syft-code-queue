@@ -27,6 +27,10 @@ dependencies = [
     "click>=8.0.0",
     "tabulate>=0.9.0",
     "syft-perm>=0.1.0",
+    # Web UI dependencies
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "python-multipart>=0.0.6",
 ]
 
 [project.optional-dependencies]

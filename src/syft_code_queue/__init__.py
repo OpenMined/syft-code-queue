@@ -756,46 +756,85 @@ class UnifiedAPI:
     def help(self):
         """Show focused help for core workflow methods."""
         help_text = f"""
-🎯 SyftBox Code Queue v{__version__} - Core Workflow
+🎯 SyftBox Code Queue v{__version__} - Getting Started Guide
+
+👋 Welcome! SyftBox Code Queue lets you run code on remote datasites securely.
+
+🚀 QUICK START - Your First Job:
+  1. Import the queue:
+     >>> import syft_code_queue as q
+  
+  2. Find available datasites:
+     >>> q.datasites                    # List all datasites with code queues
+     >>> q.datasites.ping()              # Test which datasites are responsive
+  
+  3. Submit a simple job:
+     >>> job = q.submit_python("owner@org.com", '''
+     ... import pandas as pd
+     ... print("Hello from SyftBox!")
+     ... ''', "My First Job")
+  
+  4. Check job status:
+     >>> q.pending_for_others            # See your pending jobs
+     >>> job.status                      # Check specific job status
+     >>> job.wait_for_completion()       # Wait for job to finish
 
 📡 DataSite Discovery:
-  q.datasites                        # Show all datasites with code queues
-  q.datasites.responsive_to_me()     # Show datasites that have responded to ME
-  q.datasites.responsive()           # Show datasites that have responded to ANYONE
-  q.datasites.with_pending_jobs()    # Show datasites with pending jobs
-  q.datasites.ping()                 # Send ping jobs to all datasites
-  q.datasites.responsive_to_me().ping()  # Ping only responsive datasites
+  q.datasites                           # Show all datasites with code queues
+  q.datasites.responsive_to_me()        # Datasites that have responded to YOUR jobs
+  q.datasites.responsive()              # Datasites that have responded to ANYONE
+  q.datasites.with_pending_jobs()       # Datasites with jobs awaiting approval
+  q.datasites.ping()                    # Send test jobs to all datasites
 
-📤 Submit Jobs:
+📤 Submit Jobs (as Data Scientist):
+  # Submit a folder with run.sh script:
   q.submit_job("owner@org.com", "./my_analysis", "Statistical Analysis")
-  q.submit_python("owner@org.com", "print('hello')", "Quick Script")
-  q.submit_bash("owner@org.com", "ls -la", "Directory Listing")
+  
+  # Submit Python code directly:
+  q.submit_python("owner@org.com", "print('hello')", "Quick Test")
+  
+  # Submit bash commands:
+  q.submit_bash("owner@org.com", "ls -la", "List Files")
 
-📋 Job Collections:
-  q.pending_for_me               # Jobs waiting for my approval (Data Owner)
-  q.pending_for_others           # Jobs I submitted that are pending (Data Scientist)
-  q.jobs_for_me                  # All jobs submitted to me
-  q.jobs_for_others              # All jobs I've submitted to others
+📋 View Your Jobs:
+  q.pending_for_me                      # Jobs awaiting YOUR approval (as Data Owner)
+  q.pending_for_others                  # Jobs YOU submitted awaiting approval
+  q.jobs_for_me                         # ALL jobs submitted to you
+  q.jobs_for_others                     # ALL jobs you've submitted
+  q.my_running                          # Your currently running jobs
+  q.my_completed                        # Your completed jobs
 
-✅ Job Management:
-  q.approve("job-id", "Looks safe")     # Approve job
-  q.reject("job-id", "Too broad")       # Reject job
+✅ Manage Jobs (as Data Owner):
+  # Review and approve/reject:
+  job = q.pending_for_me[0]             # Get first pending job
+  job.review()                          # See job details and code
+  job.approve("Looks safe")             # Approve the job
+  job.reject("Too broad access")        # Reject the job
+  
+  # Batch operations:
+  q.pending_for_me.approve_all("Batch approved")
 
-🔍 Basic Monitoring:
-  q.get_job("job-id")                   # Get specific job details
-  q.wait_for_completion("job-id")       # Wait for job to finish
-
-💡 Object-Oriented Usage:
-  q.jobs_for_me[0].approve("Looks safe")
-  q.pending_for_others.summary()
-  q.jobs_for_others[0].wait_for_completion()
+🔍 Monitor Jobs:
+  job = q.get_job("job-123abc")         # Get specific job by ID
+  job.status                            # Check current status
+  job.logs                              # View execution logs
+  job.output                            # Access output files
+  job.wait_for_completion()             # Block until job finishes
 
 📊 Job Lifecycle:
-  📤 submit → ⏳ pending → ✅ approved → 🏃 running → 🎉 completed
-                       ↘ 🚫 rejected            ↘ ❌ failed
+  submit → pending → approved → running → completed
+                 ↘ rejected          ↘ failed/timedout
 
-🔧 Need more methods? All advanced features are still available, just not in autocomplete.
-   Use q.VERBOSE=True for debugging. See documentation for full API.
+💡 Pro Tips:
+  • Use q.VERBOSE=True for detailed logging
+  • Jobs timeout after 24 hours by default
+  • All jobs are sandboxed for security
+  • Check q.status() for a quick overview
+
+📚 Learn More:
+  • Full docs: https://docs.syftbox.com/code-queue
+  • Examples: See examples/ folder in the repository
+  • Support: https://github.com/syftbox/syft-code-queue/issues
         """
         print(help_text)
 
@@ -823,6 +862,20 @@ list_job_files = jobs.list_job_files
 
 status = jobs.status
 help = jobs.help
+
+# Quick help function for getting started
+def quick_help():
+    """Show a quick getting started guide."""
+    print("""
+🚀 SyftBox Code Queue - Quick Start
+
+1. Import: import syft_code_queue as q
+2. Find datasites: q.datasites
+3. Submit job: q.submit_python("user@org.com", "print('Hello!')", "Test")
+4. Check status: q.pending_for_others
+5. Full help: q.help()
+""")
+    return None
 
 
 # Override module attribute access to provide fresh data from backend
@@ -896,7 +949,7 @@ def _module_setattr(name, value):
 setattr(_this_module, "__setattr__", _module_setattr)
 
 
-__version__ = "0.1.26"
+__version__ = "0.1.27"
 __all__ = [
     # Global unified API
     "jobs",
@@ -929,6 +982,7 @@ __all__ = [
     "list_job_files",
     "status",
     "help",
+    "quick_help",
     # Logging control
     "VERBOSE",
     "set_verbose",

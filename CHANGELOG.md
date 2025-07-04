@@ -1,3 +1,20 @@
+# Changelog
+
+## [0.1.27] - 2025-01-04
+
+### Added
+- Enhanced `help()` method with comprehensive getting started guide
+- Added `quick_help()` function for brief usage instructions
+- Improved help documentation with step-by-step tutorials
+- Added practical examples for all major operations
+- Added pro tips and resource links in help output
+
+### Changed
+- Updated help method to be more beginner-friendly with clear sections
+- Reorganized help content for better readability
+
+---
+
 # Cross-Datasite Workflow Changes
 
 ## Summary

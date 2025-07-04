@@ -320,15 +320,21 @@ class CodeJob(BaseModel):
     @property
     def is_terminal(self) -> bool:
         """Check if job is in a terminal state."""
-        return self.status in (JobStatus.completed, JobStatus.failed, JobStatus.rejected, JobStatus.timedout)
+        return self.status in (
+            JobStatus.completed,
+            JobStatus.failed,
+            JobStatus.rejected,
+            JobStatus.timedout,
+        )
 
     @property
     def is_expired(self) -> bool:
         """Check if this job has exceeded its timeout."""
         if self.is_terminal:
             return False  # Terminal jobs can't expire
-        
+
         from datetime import datetime
+
         now = datetime.now()
         age_seconds = (now - self.created_at).total_seconds()
         return age_seconds > self.timeout_seconds
@@ -338,8 +344,9 @@ class CodeJob(BaseModel):
         """Get remaining time in seconds before job expires. Returns 0 if expired."""
         if self.is_terminal:
             return 0
-        
+
         from datetime import datetime
+
         now = datetime.now()
         age_seconds = (now - self.created_at).total_seconds()
         remaining = max(0, self.timeout_seconds - age_seconds)
@@ -2816,9 +2823,9 @@ class DataSitesCollection:
     def _load_datasites(self):
         """Load all datasites with open code queues. Returns fresh data every time."""
         from loguru import logger
-        
+
         datasites = []
-        
+
         if not self.syftbox_client:
             logger.warning("No SyftBox client available - cannot scan for datasites")
             return datasites
@@ -2835,7 +2842,7 @@ class DataSitesCollection:
             for datasite_dir in datasites_dir.iterdir():
                 if not datasite_dir.is_dir():
                     continue
-                
+
                 # Check if it's a valid email-like datasite
                 if "@" not in datasite_dir.name:
                     continue
@@ -2848,23 +2855,31 @@ class DataSitesCollection:
 
                     # Count jobs in different statuses, deduplicating by UID
                     # Pipeline order: pending -> approved/rejected/timedout -> running -> completed/failed
-                    pipeline_order = ["pending", "approved", "rejected", "timedout", "running", "completed", "failed"]
-                    
+                    pipeline_order = [
+                        "pending",
+                        "approved",
+                        "rejected",
+                        "timedout",
+                        "running",
+                        "completed",
+                        "failed",
+                    ]
+
                     # Collect all job UIDs and their statuses
                     job_uids_by_status = {}
                     all_job_uids = {}  # uid -> latest_status_in_pipeline
-                    
+
                     for status in JobStatus:
                         status_dir = queue_dir / status.value
                         if status_dir.exists():
                             job_dirs = [d for d in status_dir.iterdir() if d.is_dir()]
                             job_uids_by_status[status.value] = set(d.name for d in job_dirs)
-                            
+
                             # Track the latest status for each UID
                             for job_dir in job_dirs:
                                 uid = job_dir.name
                                 current_status_index = pipeline_order.index(status.value)
-                                
+
                                 if uid not in all_job_uids:
                                     all_job_uids[uid] = status.value
                                 else:
@@ -2874,20 +2889,22 @@ class DataSitesCollection:
                                         all_job_uids[uid] = status.value
                         else:
                             job_uids_by_status[status.value] = set()
-                    
+
                     # Count deduplicated jobs by their actual (latest) status
                     status_counts = {}
                     for status in JobStatus:
                         status_counts[status.value] = 0
-                    
+
                     for uid, actual_status in all_job_uids.items():
                         status_counts[actual_status] += 1
-                    
+
                     total_jobs = len(all_job_uids)
 
                     # Check if pending directory has proper permissions for code queue
                     pending_dir = queue_dir / "pending"
-                    has_permissions = pending_dir.exists() and (pending_dir / "syft.pub.yaml").exists()
+                    has_permissions = (
+                        pending_dir.exists() and (pending_dir / "syft.pub.yaml").exists()
+                    )
 
                     # Analyze responsiveness history
                     responsiveness_info = self._analyze_responsiveness(queue_dir)
@@ -2903,9 +2920,9 @@ class DataSitesCollection:
                         "responded_to_others": responsiveness_info["responded_to_others"],
                         "total_responses": responsiveness_info["total_responses"],
                         "last_response_to_me": responsiveness_info["last_response_to_me"],
-                        "last_activity": self._get_last_activity(queue_dir)
+                        "last_activity": self._get_last_activity(queue_dir),
                     }
-                    
+
                     datasites.append(datasite_info)
                     logger.debug(f"Found datasite with code queue: {datasite_dir.name}")
 
@@ -2914,14 +2931,16 @@ class DataSitesCollection:
                     continue
 
             # Sort by default: last response to me (most recent first), then by email
-            datasites.sort(key=lambda x: (
-                # Put datasites that responded to me first, then others
-                0 if x["last_response_to_me"] else 1,
-                # Within each group, sort by last response time (most recent first)
-                -(x["last_response_to_me"].timestamp() if x["last_response_to_me"] else 0),
-                # Then by email as tiebreaker
-                x["email"]
-            ))
+            datasites.sort(
+                key=lambda x: (
+                    # Put datasites that responded to me first, then others
+                    0 if x["last_response_to_me"] else 1,
+                    # Within each group, sort by last response time (most recent first)
+                    -(x["last_response_to_me"].timestamp() if x["last_response_to_me"] else 0),
+                    # Then by email as tiebreaker
+                    x["email"],
+                )
+            )
             return datasites
 
         except Exception as e:
@@ -2930,7 +2949,7 @@ class DataSitesCollection:
 
     def _get_last_activity(self, queue_dir):
         """Get the last activity timestamp for a queue directory.
-        
+
         Only considers jobs that have been processed (approved, running, completed, failed, rejected).
         Pending and timedout jobs don't count as activity since they represent lack of action.
         """
@@ -2939,7 +2958,7 @@ class DataSitesCollection:
             # Only look at statuses that represent actual activity/processing
             # Note: "timedout" is excluded as it represents lack of activity, not activity
             active_statuses = ["approved", "running", "completed", "failed", "rejected"]
-            
+
             for status_name in active_statuses:
                 status_dir = queue_dir / status_name
                 if status_dir.exists() and status_dir.is_dir():
@@ -2953,9 +2972,10 @@ class DataSitesCollection:
                                         latest_time = mtime
                             except:
                                 continue
-            
+
             if latest_time:
                 from datetime import datetime
+
                 return datetime.fromtimestamp(latest_time)
             return None
         except:
@@ -2968,43 +2988,44 @@ class DataSitesCollection:
             current_user_email = None
             if self.syftbox_client:
                 current_user_email = self.syftbox_client.email
-            
+
             # Statuses that indicate the datasite owner responded/took action
             # Note: "timedout" is excluded as it represents lack of response, not a response
             response_statuses = ["approved", "rejected", "running", "completed", "failed"]
-            
+
             responded_to_me = False
             responded_to_others = False
             total_responses = 0
             last_response_to_me = None
-            
+
             for status_name in response_statuses:
                 status_dir = queue_dir / status_name
                 if not status_dir.exists():
                     continue
-                    
+
                 for job_dir in status_dir.iterdir():
                     if not job_dir.is_dir():
                         continue
-                        
+
                     try:
                         metadata_file = job_dir / "metadata.json"
                         if not metadata_file.exists():
                             continue
-                            
+
                         import json
-                        with open(metadata_file, 'r') as f:
+
+                        with open(metadata_file) as f:
                             metadata = json.load(f)
-                            
+
                         requester_email = metadata.get("requester_email")
                         if not requester_email:
                             continue
-                            
+
                         total_responses += 1
-                        
+
                         # Get the timestamp of this response
                         response_time = metadata_file.stat().st_mtime
-                        
+
                         if current_user_email and requester_email == current_user_email:
                             responded_to_me = True
                             # Track the most recent response to me
@@ -3012,11 +3033,11 @@ class DataSitesCollection:
                                 last_response_to_me = response_time
                         else:
                             responded_to_others = True
-                            
-                    except Exception as e:
+
+                    except Exception:
                         # Skip problematic job metadata
                         continue
-            
+
             # Determine category
             if responded_to_me:
                 category = "responsive_to_me"
@@ -3024,29 +3045,30 @@ class DataSitesCollection:
                 category = "responsive_to_others"
             else:
                 category = "unresponsive"
-            
+
             # Convert timestamp to datetime
             last_response_to_me_dt = None
             if last_response_to_me:
                 from datetime import datetime
+
                 last_response_to_me_dt = datetime.fromtimestamp(last_response_to_me)
-                
+
             return {
                 "category": category,
                 "responded_to_me": responded_to_me,
                 "responded_to_others": responded_to_others,
                 "total_responses": total_responses,
-                "last_response_to_me": last_response_to_me_dt
+                "last_response_to_me": last_response_to_me_dt,
             }
-            
-        except Exception as e:
+
+        except Exception:
             # Default to unresponsive if we can't determine
             return {
                 "category": "unresponsive",
                 "responded_to_me": False,
                 "responded_to_others": False,
                 "total_responses": 0,
-                "last_response_to_me": None
+                "last_response_to_me": None,
             }
 
     def refresh(self):
@@ -3057,16 +3079,22 @@ class DataSitesCollection:
     def responsive_to_me(self):
         """Filter to datasites that have responded to my job requests before."""
         datasites = self._load_datasites()
-        responsive_datasites = [ds for ds in datasites if ds["responsiveness"] == "responsive_to_me"]
+        responsive_datasites = [
+            ds for ds in datasites if ds["responsiveness"] == "responsive_to_me"
+        ]
         collection = DataSitesCollection(self.syftbox_client)
         collection._override_data = responsive_datasites
         return collection
-    
+
     @property
     def responsive(self):
         """Filter to datasites that have responded to anyone's job requests."""
         datasites = self._load_datasites()
-        responsive_datasites = [ds for ds in datasites if ds["responsiveness"] in ["responsive_to_me", "responsive_to_others"]]
+        responsive_datasites = [
+            ds
+            for ds in datasites
+            if ds["responsiveness"] in ["responsive_to_me", "responsive_to_others"]
+        ]
         collection = DataSitesCollection(self.syftbox_client)
         collection._override_data = responsive_datasites
         return collection
@@ -3083,50 +3111,52 @@ class DataSitesCollection:
     def sort_by(self, column: str, reverse: bool = False):
         """
         Sort datasites by any column.
-        
+
         Args:
             column: Column name to sort by. Available columns:
                    'email', 'total_jobs', 'pending', 'running', 'completed', 'failed',
                    'timedout', 'responsiveness', 'last_response_to_me', 'last_activity'
             reverse: True for descending order, False for ascending
-            
+
         Returns:
             New sorted DataSitesCollection
         """
         datasites = self._get_current_data()
-        
+
         def get_sort_key(ds):
-            if column == 'email':
-                return ds['email']
-            elif column == 'total_jobs':
-                return ds['total_jobs']
-            elif column == 'pending':
-                return ds['status_counts']['pending']
-            elif column == 'running':
-                return ds['status_counts']['running']
-            elif column == 'completed':
-                return ds['status_counts']['completed']
-            elif column == 'failed':
-                return ds['status_counts']['failed']
-            elif column == 'timedout':
-                return ds['status_counts']['timedout']
-            elif column == 'responsiveness':
+            if column == "email":
+                return ds["email"]
+            elif column == "total_jobs":
+                return ds["total_jobs"]
+            elif column == "pending":
+                return ds["status_counts"]["pending"]
+            elif column == "running":
+                return ds["status_counts"]["running"]
+            elif column == "completed":
+                return ds["status_counts"]["completed"]
+            elif column == "failed":
+                return ds["status_counts"]["failed"]
+            elif column == "timedout":
+                return ds["status_counts"]["timedout"]
+            elif column == "responsiveness":
                 # Sort order: responsive_to_me, responsive_to_others, unresponsive
-                order = {'responsive_to_me': 1, 'responsive_to_others': 2, 'unresponsive': 3}
-                return order.get(ds['responsiveness'], 4)
-            elif column == 'last_response_to_me':
+                order = {"responsive_to_me": 1, "responsive_to_others": 2, "unresponsive": 3}
+                return order.get(ds["responsiveness"], 4)
+            elif column == "last_response_to_me":
                 # Handle None values - put them at the end
-                if ds['last_response_to_me'] is None:
-                    return 0 if reverse else float('inf')
-                return ds['last_response_to_me'].timestamp()
-            elif column == 'last_activity':
+                if ds["last_response_to_me"] is None:
+                    return 0 if reverse else float("inf")
+                return ds["last_response_to_me"].timestamp()
+            elif column == "last_activity":
                 # Handle None values - put them at the end
-                if ds['last_activity'] is None:
-                    return 0 if reverse else float('inf')
-                return ds['last_activity'].timestamp()
+                if ds["last_activity"] is None:
+                    return 0 if reverse else float("inf")
+                return ds["last_activity"].timestamp()
             else:
-                raise ValueError(f"Unknown column: {column}. Available columns: email, total_jobs, pending, running, completed, failed, timedout, responsiveness, last_response_to_me, last_activity")
-        
+                raise ValueError(
+                    f"Unknown column: {column}. Available columns: email, total_jobs, pending, running, completed, failed, timedout, responsiveness, last_response_to_me, last_activity"
+                )
+
         try:
             sorted_datasites = sorted(datasites, key=get_sort_key, reverse=reverse)
             collection = DataSitesCollection(self.syftbox_client)
@@ -3134,13 +3164,16 @@ class DataSitesCollection:
             return collection
         except Exception as e:
             from loguru import logger
+
             logger.warning(f"Error sorting by column '{column}': {e}")
             return self
 
-    def ping(self, timeout_minutes: float = 0.5, include_self: bool = False, block: bool = False) -> dict:
+    def ping(
+        self, timeout_minutes: float = 0.5, include_self: bool = False, block: bool = False
+    ) -> dict:
         """
         Send ping jobs to all datasites in this collection.
-        
+
         Args:
             timeout_minutes: How long the ping jobs should remain valid (default 0.5 minutes = 30 seconds)
             include_self: Whether to send a ping job to yourself (default False)
@@ -3155,19 +3188,21 @@ class DataSitesCollection:
                 "sent_to": [],
                 "failed_to_send": [],
                 "jobs": [],
-                "error": "No SyftBox client available"
+                "error": "No SyftBox client available",
             }
-        
-        from .client import CodeQueueClient
-        from . import QueueConfig
-        import time
+
         import sys
+        import time
+
+        from . import QueueConfig
+        from .client import CodeQueueClient
+
         config = QueueConfig()
         client = CodeQueueClient(self.syftbox_client, config)
-        ping_script = '''import os
+        ping_script = """import os
 with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
     file.write("This is a ping to see if you're alive and receiving jobs from me.")
-'''
+"""
         timeout_seconds = int(timeout_minutes * 60)
         sent_to = []
         failed_to_send = []
@@ -3175,20 +3210,23 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
         datasites_info = self._get_current_data()
         current_user_email = self.syftbox_client.email
         from loguru import logger
+
         logger.info(f"Pinging {len(datasites_info)} datasites from collection")
         for datasite_info in datasites_info:
             target_email = datasite_info["email"]
             if target_email == current_user_email and not include_self:
-                logger.debug(f"Skipping ping to self: {target_email} (set include_self=True to ping yourself)")
+                logger.debug(
+                    f"Skipping ping to self: {target_email} (set include_self=True to ping yourself)"
+                )
                 continue
             try:
                 job = client.create_python_job(
                     target_email=target_email,
                     script_content=ping_script,
-                    name=f'Ping from {current_user_email}',
-                    description='Network connectivity test - checking if you can receive jobs from me.',
+                    name=f"Ping from {current_user_email}",
+                    description="Network connectivity test - checking if you can receive jobs from me.",
                     timeout_seconds=timeout_seconds,
-                    tags=['ping', 'network-test']
+                    tags=["ping", "network-test"],
                 )
                 sent_to.append(target_email)
                 ping_jobs.append(job)
@@ -3201,10 +3239,12 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
             "failed_to_send": failed_to_send,
             "jobs": ping_jobs,
             "timeout_minutes": timeout_minutes,
-            "collection_size": len(datasites_info)
+            "collection_size": len(datasites_info),
         }
         if not block:
-            logger.info(f"Ping summary: sent to {len(sent_to)} datasites, failed to send to {len(failed_to_send)}")
+            logger.info(
+                f"Ping summary: sent to {len(sent_to)} datasites, failed to send to {len(failed_to_send)}"
+            )
             return summary
         # --- Blocking mode: poll for responses and show status bar ---
         job_map = {job.target_email: job for job in ping_jobs}
@@ -3213,6 +3253,7 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
         failed = set(x["email"] for x in failed_to_send)
         start_time = time.time()
         poll_interval = 1.0
+
         def get_status():
             nonlocal responded, pending
             for email, job in job_map.items():
@@ -3220,14 +3261,18 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
                 if job.status in (job.status.completed, job.status.failed):
                     responded.add(email)
             pending = set(sent_to) - responded
+
         def print_status_bar(elapsed, responded, pending, total, responded_list, pending_list):
             bar_len = 30
             done = int(bar_len * len(responded) / total) if total else 0
             bar = "█" * done + "-" * (bar_len - done)
-            resp_str = ','.join(responded_list)
-            pend_str = ','.join(pending_list)
-            sys.stdout.write(f"\r[Ping] [{bar}] {len(responded)}/{total} responded, {len(pending)} pending | {int(elapsed)}s | responded: [{resp_str}] | pending: [{pend_str}]   ")
+            resp_str = ",".join(responded_list)
+            pend_str = ",".join(pending_list)
+            sys.stdout.write(
+                f"\r[Ping] [{bar}] {len(responded)}/{total} responded, {len(pending)} pending | {int(elapsed)}s | responded: [{resp_str}] | pending: [{pend_str}]   "
+            )
             sys.stdout.flush()
+
         while time.time() - start_time < timeout_seconds and pending:
             get_status()
             print_status_bar(
@@ -3287,14 +3332,15 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
     def __str__(self):
         """Display datasites as a nice table."""
         datasites = self._get_current_data()
-        
+
         if not datasites:
             return "No datasites with code queues found"
 
         try:
             from tabulate import tabulate
+
             table_data = []
-            
+
             for i, datasite in enumerate(datasites):
                 email = datasite["email"]
                 total = datasite["total_jobs"]
@@ -3305,14 +3351,15 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
                 if datasite["responsiveness"] == "responsive_to_me":
                     status = "🟢 Responsive to Me"
                 elif datasite["responsiveness"] == "responsive_to_others":
-                    status = "🟡 Responsive to Others" 
+                    status = "🟡 Responsive to Others"
                 else:
                     status = "🔴 Unresponsive"
-                
+
                 # Format last activity
                 last_activity = datasite["last_activity"]
                 if last_activity:
                     from datetime import datetime, timedelta
+
                     diff = datetime.now() - last_activity
                     if diff.days > 0:
                         activity_str = f"{diff.days}d ago"
@@ -3327,6 +3374,7 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
                 last_response_to_me = datasite["last_response_to_me"]
                 if last_response_to_me:
                     from datetime import datetime, timedelta
+
                     diff = datetime.now() - last_response_to_me
                     if diff.days > 0:
                         response_to_me_str = f"{diff.days}d ago"
@@ -3337,13 +3385,33 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
                 else:
                     response_to_me_str = "Never"
 
-                table_data.append([
-                    i, email, status, total, pending, running, completed, activity_str, response_to_me_str
-                ])
+                table_data.append(
+                    [
+                        i,
+                        email,
+                        status,
+                        total,
+                        pending,
+                        running,
+                        completed,
+                        activity_str,
+                        response_to_me_str,
+                    ]
+                )
 
-            headers = ["#", "Email", "Responsiveness", "Total", "Pending", "Running", "Completed", "Last Activity", "Last Response to Me"]
+            headers = [
+                "#",
+                "Email",
+                "Responsiveness",
+                "Total",
+                "Pending",
+                "Running",
+                "Completed",
+                "Last Activity",
+                "Last Response to Me",
+            ]
             return tabulate(table_data, headers=headers, tablefmt="grid")
-            
+
         except ImportError:
             lines = ["Available DataSites with Code Queues:"]
             for i, datasite in enumerate(datasites):
@@ -3366,7 +3434,7 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
     def _repr_html_(self):
         """Return HTML representation for Jupyter notebooks."""
         datasites = self._get_current_data()
-        
+
         if not datasites:
             return """
             <div style="padding: 20px; border: 2px solid #ddd; border-radius: 8px; background-color: #f9f9f9;">
@@ -3388,9 +3456,13 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
 
         # Determine current sort column (if any)
         # For now, just default to 'last_response_to_me' (could be improved with JS in the future)
-        current_sort = getattr(self, '_last_sort_column', 'last_response_to_me')
-        current_sort_reverse = getattr(self, '_last_sort_reverse', True)
-        sort_indicator = lambda col: (" &#9650;" if current_sort == col and not current_sort_reverse else (" &#9660;" if current_sort == col and current_sort_reverse else ""))
+        current_sort = getattr(self, "_last_sort_column", "last_response_to_me")
+        current_sort_reverse = getattr(self, "_last_sort_reverse", True)
+        sort_indicator = lambda col: (
+            " &#9650;"
+            if current_sort == col and not current_sort_reverse
+            else (" &#9660;" if current_sort == col and current_sort_reverse else "")
+        )
 
         # Create HTML table
         html = """
@@ -3405,9 +3477,9 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
                             <th class="sortable" data-sort="responsiveness" style="padding: 8px; border: 1px solid #ddd; text-align: left; min-width: 140px; cursor: pointer;">Responsiveness{resp_sort}</th>
                             <th class="sortable" data-sort="total_jobs" style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 50px; cursor: pointer;">Total{total_sort}</th>
         """.format(
-            email_sort=sort_indicator('email'),
-            resp_sort=sort_indicator('responsiveness'),
-            total_sort=sort_indicator('total_jobs'),
+            email_sort=sort_indicator("email"),
+            resp_sort=sort_indicator("responsiveness"),
+            total_sort=sort_indicator("total_jobs"),
         )
         for status_key, status_label in status_names:
             html += f'<th class="sortable" data-sort="{status_key}" style="padding: 8px; border: 1px solid #ddd; text-align: center; min-width: 60px; cursor: pointer;">{status_label}{sort_indicator(status_key)}</th>'
@@ -3418,8 +3490,8 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
                     </thead>
                     <tbody>
         """.format(
-            activity_sort=sort_indicator('last_activity'),
-            lastresp_sort=sort_indicator('last_response_to_me'),
+            activity_sort=sort_indicator("last_activity"),
+            lastresp_sort=sort_indicator("last_response_to_me"),
         )
 
         for i, datasite in enumerate(datasites):
@@ -3428,15 +3500,20 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
             status_counts = datasite["status_counts"]
             # Status with color coding based on responsiveness
             if datasite["responsiveness"] == "responsive_to_me":
-                status_badge = '<span style="color: #28a745; font-weight: bold;">🟢 Responsive to Me</span>'
+                status_badge = (
+                    '<span style="color: #28a745; font-weight: bold;">🟢 Responsive to Me</span>'
+                )
             elif datasite["responsiveness"] == "responsive_to_others":
                 status_badge = '<span style="color: #ffc107; font-weight: bold;">🟡 Responsive to Others</span>'
             else:
-                status_badge = '<span style="color: #dc3545; font-weight: bold;">🔴 Unresponsive</span>'
+                status_badge = (
+                    '<span style="color: #dc3545; font-weight: bold;">🔴 Unresponsive</span>'
+                )
             # Format last activity
             last_activity = datasite["last_activity"]
             if last_activity:
-                from datetime import datetime, timedelta
+                from datetime import datetime
+
                 diff = datetime.now() - last_activity
                 if diff.days > 0:
                     activity_str = f"{diff.days}d ago"
@@ -3449,7 +3526,8 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
             # Format last response to me
             last_response_to_me = datasite["last_response_to_me"]
             if last_response_to_me:
-                from datetime import datetime, timedelta
+                from datetime import datetime
+
                 diff = datetime.now() - last_response_to_me
                 if diff.days > 0:
                     response_to_me_str = f"{diff.days}d ago"
@@ -3469,19 +3547,19 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
             """
             for status_key, _ in status_names:
                 count = status_counts.get(status_key, 0)
-                color = ''
-                if status_key == 'pending' and count > 0:
-                    color = 'color: #dc3545; font-weight: bold;'
-                elif status_key == 'running' and count > 0:
-                    color = 'color: #007bff; font-weight: bold;'
-                elif status_key == 'completed' and count > 0:
-                    color = 'color: #28a745; font-weight: bold;'
-                elif status_key == 'failed' and count > 0:
-                    color = 'color: #b71c1c; font-weight: bold;'
-                elif status_key == 'rejected' and count > 0:
-                    color = 'color: #ff9800; font-weight: bold;'
-                elif status_key == 'timedout' and count > 0:
-                    color = 'color: #888; font-weight: bold;'
+                color = ""
+                if status_key == "pending" and count > 0:
+                    color = "color: #dc3545; font-weight: bold;"
+                elif status_key == "running" and count > 0:
+                    color = "color: #007bff; font-weight: bold;"
+                elif status_key == "completed" and count > 0:
+                    color = "color: #28a745; font-weight: bold;"
+                elif status_key == "failed" and count > 0:
+                    color = "color: #b71c1c; font-weight: bold;"
+                elif status_key == "rejected" and count > 0:
+                    color = "color: #ff9800; font-weight: bold;"
+                elif status_key == "timedout" and count > 0:
+                    color = "color: #888; font-weight: bold;"
                 html += f'<td style="padding: 8px; border: 1px solid #ddd; text-align: center; {color}">{count}</td>'
             html += f"""
                     <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-size: 0.9em; color: #666;">{activity_str}</td>
@@ -3507,36 +3585,35 @@ with open(os.getenv("OUTPUT_DIR")+"/ping.txt", "w") as file:
 
     def jobs_streamlit(self, port=8501, auto_open=True):
         """Launch a Streamlit app showing all jobs across the network with unicorn rainbow animation for new jobs."""
-        
+
         # Check if streamlit is available
         try:
             import streamlit
         except ImportError:
             print("❌ Streamlit is not installed. Install it with:")
             print("   pip install streamlit")
-            print("   or")  
+            print("   or")
             print("   uv add streamlit")
             print()
             print("💡 Alternatively, use q.datasites.jobs_widget() for a Jupyter widget version")
             return None
-            
+
         # Check if streamlit command is available
-        import subprocess
         import shutil
-        if not shutil.which('streamlit'):
+        import subprocess
+
+        if not shutil.which("streamlit"):
             print("❌ Streamlit command not found in PATH")
             print("💡 Try: pip install streamlit")
             print("💡 Alternatively, use q.datasites.jobs_widget() for a Jupyter widget version")
             return None
-        
-        import tempfile
+
         import os
+        import tempfile
         import threading
         import time
         import webbrowser
-        import json
-        from datetime import datetime
-        
+
         # Create the Streamlit app code
         streamlit_code = '''
 import streamlit as st
@@ -4049,12 +4126,12 @@ def main():
 if __name__ == "__main__":
     main()
 '''
-        
+
         # Write the Streamlit app to a temporary file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(streamlit_code)
             temp_file = f.name
-        
+
         def run_streamlit():
             """Run Streamlit in a separate process"""
             try:
@@ -4069,95 +4146,96 @@ if __name__ == "__main__":
                     os.unlink(temp_file)
                 except:
                     pass
-        
+
         # Start Streamlit in background thread
         streamlit_thread = threading.Thread(target=run_streamlit, daemon=True)
         streamlit_thread.start()
-        
+
         # Wait a moment for Streamlit to start, then open browser
         if auto_open:
             time.sleep(3)
             webbrowser.open(f"http://localhost:{port}")
-            
-        print(f"✅ Streamlit is installed and working!")
+
+        print("✅ Streamlit is installed and working!")
         print(f"🌐 Live Jobs Network launched at http://localhost:{port}")
         print("💡 The app will auto-refresh every 2 seconds")
         print("🦄 New jobs get the unicorn rainbow animation from syft-reviewer-allowlist!")
         print("🛑 Press Ctrl+C in the terminal to stop the server")
-        
+
         return f"http://localhost:{port}"
 
     def jobs_ui(self, port=8002, auto_open=True):
         """
         Launch the Syft Code Queue web UI for browsing jobs across the network.
-        
+
         This starts a FastAPI backend with Next.js frontend that provides:
         - Live job browsing with auto-refresh
         - Job filtering by status and sender
         - Detailed job view with file contents
         - Interactive action buttons for review/logs/output
         - Beautiful shadcn/ui design
-        
+
         Args:
             port: Port to run the web UI on (default: 8002)
             auto_open: Whether to automatically open the browser (default: True)
-            
+
         Returns:
             URL of the launched web UI
         """
+        import os
         import subprocess
         import threading
         import time
         import webbrowser
-        import os
         from pathlib import Path
-        
+
         # Get the syft-code-queue package directory
         try:
             import syft_code_queue
+
             package_dir = Path(syft_code_queue.__file__).parent.parent.parent
         except:
             # Fallback to current directory
             package_dir = Path.cwd()
-        
-        print(f"🚀 Starting Syft Code Queue Web UI...")
+
+        print("🚀 Starting Syft Code Queue Web UI...")
         print(f"📁 Package directory: {package_dir}")
-        
+
         def run_ui_server():
             """Run the web UI server in a separate process"""
             try:
                 # Change to the package directory
                 os.chdir(package_dir)
-                
+
                 # Set the port environment variable
                 env = os.environ.copy()
-                env['SYFTBOX_ASSIGNED_PORT'] = str(port)
-                
+                env["SYFTBOX_ASSIGNED_PORT"] = str(port)
+
                 # Run the startup script
                 cmd = ["bash", "run.sh"]
                 subprocess.run(cmd, env=env, check=True)
             except subprocess.CalledProcessError as e:
                 print(f"❌ Error running web UI: {e}")
-                print(f"💡 Make sure you're in the syft-code-queue directory and run.sh exists")
+                print("💡 Make sure you're in the syft-code-queue directory and run.sh exists")
             except FileNotFoundError:
                 print(f"❌ Could not find run.sh script in {package_dir}")
-                print(f"💡 Please ensure you're running from the syft-code-queue package directory")
-        
+                print("💡 Please ensure you're running from the syft-code-queue package directory")
+
         # Start UI server in background thread
         ui_thread = threading.Thread(target=run_ui_server, daemon=True)
         ui_thread.start()
-        
+
         # Wait a moment for the server to start, then open browser
         if auto_open:
             time.sleep(5)  # Give more time for the full stack to start
             webbrowser.open(f"http://localhost:{port}")
-            
-        print(f"✅ Syft Code Queue Web UI is starting!")
+
+        print("✅ Syft Code Queue Web UI is starting!")
         print(f"🌐 Web UI will be available at http://localhost:{port}")
         print("💡 The UI will auto-refresh and show live job data")
         print("🎨 Beautiful shadcn/ui design with job filtering and details")
         print("🛑 Press Ctrl+C in the terminal to stop the server")
-        
+
         return f"http://localhost:{port}"
 
     def help(self):

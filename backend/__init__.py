@@ -1,1 +1,1 @@
-"""Backend for syft-reviewer-allowlist allowlist management.""" 
+"""Backend for syft-reviewer-allowlist allowlist management."""

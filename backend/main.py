@@ -2,22 +2,23 @@
 FastAPI backend for syft-code-queue with SyftBox integration
 """
 
-import os
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Union
-import json
-
-from fastapi import FastAPI, Depends, HTTPException, Body, Path, Request, Query
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, HTMLResponse
+from datetime import datetime
 from pathlib import Path as PathLib
+from typing import Any, Dict, Optional
+
+from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from syft_core import Client
 
 from .models import (
-    JobResponse, JobListResponse, JobDetailsResponse, JobActionRequest,
-    MessageResponse, JobStatsResponse
+    JobActionRequest,
+    JobDetailsResponse,
+    JobListResponse,
+    JobStatsResponse,
+    MessageResponse,
 )
 
 # Import syft_code_queue for job browsing
@@ -34,29 +35,29 @@ except ImportError:
 def _get_file_type(file_path: str) -> str:
     """Determine file type based on extension."""
     file_path = str(file_path).lower()
-    
-    if file_path.endswith(('.py', '.pyw')):
-        return 'python'
-    elif file_path.endswith(('.js', '.mjs')):
-        return 'javascript'
-    elif file_path.endswith('.ts'):
-        return 'typescript'
-    elif file_path.endswith('.sh'):
-        return 'shell'
-    elif file_path.endswith('.md'):
-        return 'markdown'
-    elif file_path.endswith('.json'):
-        return 'json'
-    elif file_path.endswith(('.yml', '.yaml')):
-        return 'yaml'
-    elif file_path.endswith('.sql'):
-        return 'sql'
-    elif file_path.endswith('.csv'):
-        return 'csv'
-    elif file_path.endswith(('.txt', '.log')):
-        return 'text'
+
+    if file_path.endswith((".py", ".pyw")):
+        return "python"
+    elif file_path.endswith((".js", ".mjs")):
+        return "javascript"
+    elif file_path.endswith(".ts"):
+        return "typescript"
+    elif file_path.endswith(".sh"):
+        return "shell"
+    elif file_path.endswith(".md"):
+        return "markdown"
+    elif file_path.endswith(".json"):
+        return "json"
+    elif file_path.endswith((".yml", ".yaml")):
+        return "yaml"
+    elif file_path.endswith(".sql"):
+        return "sql"
+    elif file_path.endswith(".csv"):
+        return "csv"
+    elif file_path.endswith((".txt", ".log")):
+        return "text"
     else:
-        return 'text'
+        return "text"
 
 
 def _format_time_ago(timestamp: datetime) -> str:
@@ -66,9 +67,9 @@ def _format_time_ago(timestamp: datetime) -> str:
         timestamp = timestamp.replace(tzinfo=None)
     if now.tzinfo is None:
         now = now.replace(tzinfo=None)
-    
+
     diff = now - timestamp
-    
+
     if diff.days > 0:
         return f"{diff.days}d ago"
     elif diff.seconds > 3600:
@@ -86,7 +87,7 @@ def _get_datasites_collection() -> Optional[DataSitesCollection]:
     try:
         if not q:
             return None
-        
+
         # Try to create a mock client for job browsing
         client = MockSyftBoxClient()
         return DataSitesCollection(client)
@@ -118,7 +119,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:*",
-        "http://127.0.0.1:*"
+        "http://127.0.0.1:*",
     ],
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=True,
@@ -155,20 +156,17 @@ async def get_status(client: Client = Depends(get_client)) -> Dict[str, Any]:
             job_count = len(jobs)
         except Exception as e:
             logger.error(f"Failed to count jobs: {e}")
-    
+
     return {
         "app": "Syft Code Queue UI",
         "version": "0.1.0",
         "timestamp": datetime.now(),
-        "syftbox": {
-            "status": "connected",
-            "user_email": client.email
-        },
+        "syftbox": {"status": "connected", "user_email": client.email},
         "components": {
             "backend": "running",
             "job_browser": "enabled" if q else "disabled",
-            "total_jobs": job_count
-        }
+            "total_jobs": job_count,
+        },
     }
 
 
@@ -177,30 +175,30 @@ async def get_jobs(
     limit: int = Query(100, description="Maximum number of jobs to return"),
     status: Optional[str] = Query(None, description="Filter by job status"),
     sender: Optional[str] = Query(None, description="Filter by sender email"),
-    client: Client = Depends(get_client)
+    client: Client = Depends(get_client),
 ) -> JobListResponse:
     """Get list of all jobs across the network."""
     try:
         datasites = _get_datasites_collection()
         if not datasites:
             raise HTTPException(status_code=503, detail="Job browsing not available")
-        
+
         all_jobs = datasites.get_all_jobs()
-        
+
         # Apply filters
         if status:
-            all_jobs = [job for job in all_jobs if job.get('status', '').lower() == status.lower()]
-        
+            all_jobs = [job for job in all_jobs if job.get("status", "").lower() == status.lower()]
+
         if sender:
-            all_jobs = [job for job in all_jobs if job.get('sender', '').lower() == sender.lower()]
-        
+            all_jobs = [job for job in all_jobs if job.get("sender", "").lower() == sender.lower()]
+
         # Sort by creation time (newest first)
-        all_jobs.sort(key=lambda x: x.get('created_at', datetime.min), reverse=True)
-        
+        all_jobs.sort(key=lambda x: x.get("created_at", datetime.min), reverse=True)
+
         # Apply limit
         if limit > 0:
             all_jobs = all_jobs[:limit]
-        
+
         # Format jobs for response
         formatted_jobs = []
         for job in all_jobs:
@@ -213,16 +211,17 @@ async def get_jobs(
                 "datasite": job.get("datasite", ""),
                 "files": job.get("files", []),
                 "description": job.get("description", ""),
-                "is_recent": (datetime.now() - job.get("created_at", datetime.min)).total_seconds() < 3
+                "is_recent": (datetime.now() - job.get("created_at", datetime.min)).total_seconds()
+                < 3,
             }
             formatted_jobs.append(formatted_job)
-        
+
         return JobListResponse(
             jobs=formatted_jobs,
             total=len(formatted_jobs),
-            filtered=len(formatted_jobs) < len(all_jobs) if status or sender else False
+            filtered=len(formatted_jobs) < len(all_jobs) if status or sender else False,
         )
-    
+
     except Exception as e:
         logger.error(f"Failed to get jobs: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve jobs: {str(e)}")
@@ -235,20 +234,26 @@ async def get_job_stats(client: Client = Depends(get_client)) -> JobStatsRespons
         datasites = _get_datasites_collection()
         if not datasites:
             raise HTTPException(status_code=503, detail="Job browsing not available")
-        
+
         all_jobs = datasites.get_all_jobs()
-        
+
         stats = {
             "total": len(all_jobs),
-            "pending": len([j for j in all_jobs if j.get('status', '').lower() == 'pending']),
-            "running": len([j for j in all_jobs if j.get('status', '').lower() == 'running']),
-            "completed": len([j for j in all_jobs if j.get('status', '').lower() == 'completed']),
-            "failed": len([j for j in all_jobs if j.get('status', '').lower() == 'failed']),
-            "recent": len([j for j in all_jobs if (datetime.now() - j.get("created_at", datetime.min)).total_seconds() < 3])
+            "pending": len([j for j in all_jobs if j.get("status", "").lower() == "pending"]),
+            "running": len([j for j in all_jobs if j.get("status", "").lower() == "running"]),
+            "completed": len([j for j in all_jobs if j.get("status", "").lower() == "completed"]),
+            "failed": len([j for j in all_jobs if j.get("status", "").lower() == "failed"]),
+            "recent": len(
+                [
+                    j
+                    for j in all_jobs
+                    if (datetime.now() - j.get("created_at", datetime.min)).total_seconds() < 3
+                ]
+            ),
         }
-        
+
         return JobStatsResponse(**stats)
-    
+
     except Exception as e:
         logger.error(f"Failed to get job stats: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve job stats: {str(e)}")
@@ -256,21 +261,20 @@ async def get_job_stats(client: Client = Depends(get_client)) -> JobStatsRespons
 
 @app.get("/api/v1/jobs/{job_uid}", response_model=JobDetailsResponse)
 async def get_job_details(
-    job_uid: str = Path(..., description="Job UID"),
-    client: Client = Depends(get_client)
+    job_uid: str = Path(..., description="Job UID"), client: Client = Depends(get_client)
 ) -> JobDetailsResponse:
     """Get detailed information about a specific job."""
     try:
         datasites = _get_datasites_collection()
         if not datasites:
             raise HTTPException(status_code=503, detail="Job browsing not available")
-        
+
         all_jobs = datasites.get_all_jobs()
         job = next((j for j in all_jobs if j.get("uid") == job_uid), None)
-        
+
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
-        
+
         # Get detailed file information
         files_with_content = []
         for file_info in job.get("files", []):
@@ -279,10 +283,10 @@ async def get_job_details(
                 "type": _get_file_type(file_info.get("path", "")),
                 "size": file_info.get("size", 0),
                 "content": file_info.get("content", ""),
-                "modified_at": file_info.get("modified_at", datetime.now())
+                "modified_at": file_info.get("modified_at", datetime.now()),
             }
             files_with_content.append(file_detail)
-        
+
         return JobDetailsResponse(
             uid=job.get("uid", ""),
             sender=job.get("sender", ""),
@@ -294,9 +298,9 @@ async def get_job_details(
             files=files_with_content,
             logs=job.get("logs", ""),
             output=job.get("output", ""),
-            is_recent=(datetime.now() - job.get("created_at", datetime.min)).total_seconds() < 3
+            is_recent=(datetime.now() - job.get("created_at", datetime.min)).total_seconds() < 3,
         )
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -308,16 +312,16 @@ async def get_job_details(
 async def perform_job_action(
     job_uid: str = Path(..., description="Job UID"),
     action_request: JobActionRequest = Body(...),
-    client: Client = Depends(get_client)
+    client: Client = Depends(get_client),
 ) -> MessageResponse:
     """Perform an action on a job (review, get logs, get output)."""
     try:
         datasites = _get_datasites_collection()
         if not datasites:
             raise HTTPException(status_code=503, detail="Job browsing not available")
-        
+
         action = action_request.action.lower()
-        
+
         if action == "review":
             code = f'q.get_job("{job_uid}").review()'
         elif action == "logs":
@@ -326,12 +330,9 @@ async def perform_job_action(
             code = f'q.get_job("{job_uid}").get_output()'
         else:
             raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
-        
-        return MessageResponse(
-            message=f"Action '{action}' prepared for job {job_uid}",
-            code=code
-        )
-    
+
+        return MessageResponse(message=f"Action '{action}' prepared for job {job_uid}", code=code)
+
     except HTTPException:
         raise
     except Exception as e:
@@ -345,7 +346,7 @@ async def root():
     try:
         frontend_path = PathLib(__file__).parent.parent / "frontend" / "out"
         index_path = frontend_path / "index.html"
-        
+
         if index_path.exists():
             return HTMLResponse(content=index_path.read_text(), status_code=200)
         else:
@@ -360,7 +361,7 @@ async def root():
                     </body>
                 </html>
                 """,
-                status_code=200
+                status_code=200,
             )
     except Exception as e:
         logger.error(f"Failed to serve root page: {e}")
@@ -375,10 +376,11 @@ async def root():
                 </body>
             </html>
             """,
-            status_code=500
+            status_code=500,
         )
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

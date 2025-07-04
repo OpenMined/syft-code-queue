@@ -34,7 +34,7 @@ from uuid import UUID
 from loguru import logger
 
 from .client import CodeQueueClient, create_client
-from .models import CodeJob, JobCollection, JobStatus, QueueConfig, DataSitesCollection
+from .models import CodeJob, DataSitesCollection, JobCollection, JobStatus, QueueConfig
 
 # Global VERBOSE flag to control logging level
 VERBOSE = False
@@ -99,13 +99,13 @@ class UnifiedAPI:
             self.syftbox_client = SyftBoxClient()
             self.config = config or QueueConfig(queue_name="code-queue")
             self.client = None
-        
+
         # Clean up corrupted jobs across all datasites before doing anything else
         self._cleanup_corrupted_jobs()
-        
+
         # Clean up expired jobs across all datasites
         self._cleanup_expired_jobs()
-        
+
         # Initialize datasites collection
         self._datasites_collection = None
 
@@ -114,44 +114,44 @@ class UnifiedAPI:
         try:
             if not self.syftbox_client:
                 return
-                
+
             datasites_dir = self.syftbox_client.datasites
             if not datasites_dir.exists():
                 logger.debug("Datasites directory does not exist, skipping cleanup")
                 return
-                
+
             logger.debug(f"Cleaning up corrupted jobs across all datasites in: {datasites_dir}")
             total_cleaned = 0
             datasites_checked = 0
             datasites_with_queues = 0
-            
+
             # Iterate through all datasites
             all_datasites = list(datasites_dir.iterdir())
             logger.debug(f"Found {len(all_datasites)} items in datasites directory")
-            
+
             for datasite_dir in all_datasites:
                 if not datasite_dir.is_dir():
                     logger.debug(f"Skipping {datasite_dir.name} - not a directory")
                     continue
-                
+
                 # Check if it's a valid email-like datasite
                 if "@" not in datasite_dir.name:
                     logger.debug(f"Skipping {datasite_dir.name} - not an email-like datasite")
                     continue
-                    
+
                 datasites_checked += 1
                 logger.debug(f"Checking datasite: {datasite_dir.name}")
-                    
+
                 try:
                     # Check if this datasite has a code-queue app
                     queue_dir = datasite_dir / "app_data" / self.config.queue_name / "jobs"
                     if not queue_dir.exists():
                         logger.debug(f"No code-queue found at: {queue_dir}")
                         continue
-                        
+
                     datasites_with_queues += 1
                     logger.debug(f"Found code-queue in: {datasite_dir.name}")
-                    
+
                     # Check all status directories in this datasite
                     jobs_found = 0
                     for status in JobStatus:
@@ -159,51 +159,64 @@ class UnifiedAPI:
                         if not status_dir.exists():
                             logger.debug(f"No {status.value} directory in {datasite_dir.name}")
                             continue
-                            
+
                         # Check each job directory
                         job_dirs = list(status_dir.iterdir())
                         if job_dirs:
-                            logger.debug(f"Found {len(job_dirs)} {status.value} jobs in {datasite_dir.name}")
-                        
+                            logger.debug(
+                                f"Found {len(job_dirs)} {status.value} jobs in {datasite_dir.name}"
+                            )
+
                         for job_dir in job_dirs:
                             if not job_dir.is_dir():
-                                logger.debug(f"Skipping {job_dir.name} in {status.value} - not a directory")
+                                logger.debug(
+                                    f"Skipping {job_dir.name} in {status.value} - not a directory"
+                                )
                                 continue
-                                
+
                             jobs_found += 1
                             try:
-                                logger.debug(f"Checking job {job_dir.name} in {datasite_dir.name}/{status.value}")
+                                logger.debug(
+                                    f"Checking job {job_dir.name} in {datasite_dir.name}/{status.value}"
+                                )
                                 if self._is_corrupted_job(job_dir):
-                                    logger.info(f"🗑️  Removing corrupted {status.value} job: {datasite_dir.name}/{job_dir.name}")
+                                    logger.info(
+                                        f"🗑️  Removing corrupted {status.value} job: {datasite_dir.name}/{job_dir.name}"
+                                    )
                                     import shutil
+
                                     shutil.rmtree(job_dir)
                                     total_cleaned += 1
                                 else:
                                     # Log what we found for debugging
                                     items = list(job_dir.iterdir())
-                                    logger.debug(f"✅ Job {job_dir.name} in {status.value} is valid - {len(items)} items: {[item.name for item in items[:5]]}")
+                                    logger.debug(
+                                        f"✅ Job {job_dir.name} in {status.value} is valid - {len(items)} items: {[item.name for item in items[:5]]}"
+                                    )
                             except Exception as e:
                                 logger.warning(f"❌ Could not process job directory {job_dir}: {e}")
-                    
+
                     if jobs_found > 0:
                         logger.info(f"Processed {jobs_found} total jobs in {datasite_dir.name}")
                     else:
                         logger.debug(f"No jobs found in {datasite_dir.name}")
-                                
+
                 except Exception as e:
                     logger.warning(f"Error cleaning up datasite {datasite_dir.name}: {e}")
                     continue
-            
+
             # Final summary
-            logger.debug(f"Cleanup Summary: Checked {datasites_checked} datasites, {datasites_with_queues} had code-queues")
+            logger.debug(
+                f"Cleanup Summary: Checked {datasites_checked} datasites, {datasites_with_queues} had code-queues"
+            )
             if total_cleaned > 0:
                 logger.info(f"🗑️  Cleaned up {total_cleaned} corrupted job directories")
             else:
                 logger.debug("No corrupted jobs found - all clean!")
-                        
+
         except Exception as e:
             logger.warning(f"Error during job cleanup: {e}")
-    
+
     def _is_corrupted_job(self, job_dir):
         """Check if a job directory only contains folders and syft.pub.yaml files (indicating corruption)."""
         try:
@@ -213,14 +226,14 @@ class UnifiedAPI:
                 # Empty directory is definitely corrupted
                 logger.debug(f"Empty job directory found: {job_dir.name} - marking as corrupted")
                 return True
-                
+
             # Check what types of items we have
             has_actual_files = False
             file_count = 0
             yaml_count = 0
             dir_count = 0
             actual_files = []
-            
+
             for item in items:
                 if item.is_file():
                     file_count += 1
@@ -237,21 +250,23 @@ class UnifiedAPI:
                     if self._directory_has_content(item):
                         has_actual_files = True
                         actual_files.append(f"{item.name}/")
-            
+
             # If we only found folders and syft.pub.yaml files, it's corrupted
             is_corrupted = not has_actual_files
-            
+
             if is_corrupted:
-                logger.debug(f"Corrupted job detected: {job_dir.name} - {file_count} files ({yaml_count} yaml), {dir_count} dirs, no actual content")
+                logger.debug(
+                    f"Corrupted job detected: {job_dir.name} - {file_count} files ({yaml_count} yaml), {dir_count} dirs, no actual content"
+                )
             else:
                 logger.debug(f"Valid job: {job_dir.name} - actual files: {actual_files[:3]}")
-            
+
             return is_corrupted
-            
+
         except Exception as e:
             logger.warning(f"Error checking if job {job_dir} is corrupted: {e}")
             return False
-    
+
     def _directory_has_content(self, directory):
         """Recursively check if a directory has any actual content (not just syft.pub.yaml files)."""
         try:
@@ -267,68 +282,75 @@ class UnifiedAPI:
         try:
             if not self.syftbox_client:
                 return
-                
+
             datasites_dir = self.syftbox_client.datasites
             if not datasites_dir.exists():
                 logger.debug("Datasites directory does not exist, skipping timeout cleanup")
                 return
-                
+
             logger.debug(f"Cleaning up expired jobs across all datasites in: {datasites_dir}")
             total_expired = 0
-            
-            from .models import JobStatus
-            from datetime import datetime
+
             import json
             import shutil
-            
+            from datetime import datetime
+
+            from .models import JobStatus
+
             # Iterate through all datasites
             for datasite_dir in datasites_dir.iterdir():
                 if not datasite_dir.is_dir() or "@" not in datasite_dir.name:
                     continue
-                    
+
                 try:
                     # Check if this datasite has a code-queue app
                     queue_dir = datasite_dir / "app_data" / self.config.queue_name / "jobs"
                     if not queue_dir.exists():
                         continue
-                        
+
                     # Check non-terminal status directories
-                    non_terminal_statuses = [JobStatus.pending, JobStatus.approved, JobStatus.running]
-                    
+                    non_terminal_statuses = [
+                        JobStatus.pending,
+                        JobStatus.approved,
+                        JobStatus.running,
+                    ]
+
                     for status in non_terminal_statuses:
                         status_dir = queue_dir / status.value
                         if not status_dir.exists():
                             continue
-                            
+
                         # Check each job directory
                         for job_dir in status_dir.iterdir():
                             if not job_dir.is_dir():
                                 continue
-                                
+
                             try:
                                 # Read job metadata to check timeout
                                 metadata_file = job_dir / "metadata.json"
                                 if not metadata_file.exists():
                                     continue
-                                    
-                                with open(metadata_file, 'r') as f:
+
+                                with open(metadata_file) as f:
                                     metadata = json.load(f)
-                                
+
                                 # Check if job is expired
                                 created_at_str = metadata.get("created_at")
-                                timeout_seconds = metadata.get("timeout_seconds", 86400)  # Default 24 hours
-                                
+                                timeout_seconds = metadata.get(
+                                    "timeout_seconds", 86400
+                                )  # Default 24 hours
+
                                 if not created_at_str:
                                     continue
-                                    
+
                                 try:
                                     created_at = datetime.fromisoformat(created_at_str)
                                 except ValueError:
                                     continue
-                                    
+
                                 now = datetime.now()
                                 age_seconds = (now - created_at).total_seconds()
-                                
+
                                 if age_seconds > timeout_seconds:
                                     # Job has expired, determine target status
                                     if status == JobStatus.pending:
@@ -337,42 +359,46 @@ class UnifiedAPI:
                                     else:  # approved or running
                                         target_status = JobStatus.failed
                                         reason = "Job expired - execution timeout exceeded"
-                                    
+
                                     # Move job to target status directory
                                     target_dir = queue_dir / target_status.value
                                     target_dir.mkdir(exist_ok=True)
                                     target_job_dir = target_dir / job_dir.name
-                                    
+
                                     # Update metadata with new status and error message
                                     metadata["status"] = target_status.value
                                     metadata["error_message"] = reason
                                     metadata["updated_at"] = now.isoformat()
                                     if target_status == JobStatus.failed:
                                         metadata["completed_at"] = now.isoformat()
-                                    
+
                                     # Write updated metadata to new location
                                     shutil.move(str(job_dir), str(target_job_dir))
-                                    
+
                                     # Update metadata in new location
-                                    with open(target_job_dir / "metadata.json", 'w') as f:
+                                    with open(target_job_dir / "metadata.json", "w") as f:
                                         json.dump(metadata, f, indent=2)
-                                    
-                                    logger.info(f"⏰ Expired job moved: {datasite_dir.name}/{job_dir.name} ({status.value} → {target_status.value})")
+
+                                    logger.info(
+                                        f"⏰ Expired job moved: {datasite_dir.name}/{job_dir.name} ({status.value} → {target_status.value})"
+                                    )
                                     total_expired += 1
-                                    
+
                             except Exception as e:
                                 logger.warning(f"Could not process job {job_dir} for timeout: {e}")
                                 continue
-                                
+
                 except Exception as e:
-                    logger.debug(f"Error cleaning up expired jobs in datasite {datasite_dir.name}: {e}")
+                    logger.debug(
+                        f"Error cleaning up expired jobs in datasite {datasite_dir.name}: {e}"
+                    )
                     continue
-            
+
             if total_expired > 0:
                 logger.info(f"⏰ Cleaned up {total_expired} expired jobs")
             else:
                 logger.debug("No expired jobs found")
-                        
+
         except Exception as e:
             logger.warning(f"Error during expired job cleanup: {e}")
 
@@ -517,7 +543,9 @@ class UnifiedAPI:
         """
         if self.client is None:
             raise RuntimeError("API not properly initialized")
-        job = self.client.submit_code(target_email, code_folder, name, description, timeout_seconds, tags)
+        job = self.client.submit_code(
+            target_email, code_folder, name, description, timeout_seconds, tags
+        )
         return self._connect_job_apis(job)
 
     def submit_python(
@@ -577,7 +605,9 @@ class UnifiedAPI:
         """
         if self.client is None:
             raise RuntimeError("API not properly initialized")
-        job = self.client.create_bash_job(target_email, script_content, name, description, timeout_seconds, tags)
+        job = self.client.create_bash_job(
+            target_email, script_content, name, description, timeout_seconds, tags
+        )
         return self._connect_job_apis(job)
 
     # Legacy Functional API (for backward compatibility)
@@ -751,8 +781,6 @@ class UnifiedAPI:
         # The properties will fetch fresh data on next access
         pass
 
-
-
     def help(self):
         """Show focused help for core workflow methods."""
         help_text = f"""
@@ -862,6 +890,7 @@ list_job_files = jobs.list_job_files
 
 status = jobs.status
 help = jobs.help
+
 
 # Quick help function for getting started
 def quick_help():

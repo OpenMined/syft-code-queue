@@ -3,18 +3,21 @@ Pydantic models for syft-code-queue UI API
 """
 
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Union
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 
 class MessageResponse(BaseModel):
     """Standard message response."""
+
     message: str
     code: Optional[str] = None
 
 
 class JobFileInfo(BaseModel):
     """Information about a file in a job."""
+
     path: str
     type: str
     size: int
@@ -24,6 +27,7 @@ class JobFileInfo(BaseModel):
 
 class JobResponse(BaseModel):
     """Basic job information."""
+
     uid: str
     sender: str
     status: str
@@ -37,6 +41,7 @@ class JobResponse(BaseModel):
 
 class JobListResponse(BaseModel):
     """Response for job list endpoint."""
+
     jobs: List[JobResponse]
     total: int
     filtered: bool = False
@@ -44,6 +49,7 @@ class JobListResponse(BaseModel):
 
 class JobDetailsResponse(BaseModel):
     """Detailed job information."""
+
     uid: str
     sender: str
     status: str
@@ -59,6 +65,7 @@ class JobDetailsResponse(BaseModel):
 
 class JobStatsResponse(BaseModel):
     """Job statistics."""
+
     total: int
     pending: int
     running: int
@@ -69,4 +76,5 @@ class JobStatsResponse(BaseModel):
 
 class JobActionRequest(BaseModel):
     """Request to perform an action on a job."""
-    action: str = Field(..., description="Action to perform: review, logs, or output") 
+
+    action: str = Field(..., description="Action to perform: review, logs, or output")
